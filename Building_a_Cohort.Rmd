@@ -1,0 +1,67 @@
+---
+title: "Building_a_Cohort"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Loading Data
+
+----
+##### 1.1 (5 pts)
+
+The first part of any patient-level study is identify the patients who are relevant to the study, and at what point during their records they became eligible. Typically, this is done with a set of "inclusion critera", which, if met, qualify the patient for inclusion. In our study, we will consider the following inclusion criteria based on [this study](http://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=4649796):
+
+- Patients who were on mechanical ventilation
+- and have a P/F ratio > 250 for first 12 hours of ventilation
+- After at least the initial 12 hour period, P/F ratio drops below 300 and remains below 300 for > 1 day
+
+The process of identifying patients who meet certain clinical criteria is sometimes refered to as _electronic phenotyping_.
+
+It seems that to do this, we will need to know who was on _mechanical ventilaion_ and what their _P/F ratios_ were over time. We need to find if and where those are recorded in the database by seeing if there is an internal code or ID assigned to them. Using the MIMIC docomumentation, determine what table(s) in MIMIC you would query to find out if and where mechanical ventillation or P/F ratios would be recorded. 
+
+**MY ANWSER:**
+
+Look up 'D_ICD_PROCEDURES' table to find the code for mechanical ventilation
+
+Use PROCEDURES_ICD table to find the patient and admissions that have this ICD9 code. 
+
+ICD-9-CM Procedure Codes for continuous invasive mechanical ventilation  
+96.70, Continuous invasive mechanical ventilation of unspecified duration
+96.71, Continuous invasive mechanical ventilation for less than 96 consecutive hours
+96.72, Continuous invasive mechanical ventilation for 96 consecutive hours or more
+
+P/F should be able to access from LABEVENTS table. This table is believed to have measurement result for Pao2 and Fio2.
+To find the code for Pao2 and Fio2, look up D_LABITEMS table. 
+
+
+
+##### 1.2 (5 pts)
+
+If you were to search that table using the measurement label and find counts of the measurements (from other tables) of the relevant results, you would see that the duration of mechanical ventilation is not specified and P/F measurements are not directly recorded. However, there may be a way to create this data from what we do have. If we're lucky, other researchers have already done this work for us, most likely using SQL. 
+
+Search the web for _SQL_ that uses _MIMIC_ data to compute _mechanical ventilation duration_ and for _SQL_ to compute the _Pao2 Fao2 ratio_. Report the URLs of the sources you find. 
+
+**MY ANWSER:**
+
+https://github.com/MIT-LCP/mimic-code/blob/master/etc/ventilation-durations.sql  
+https://github.com/MIT-LCP/mimic-cookbook/blob/master/postgres/sofa_score_inserts.sql
+
+##### 1.3 (5 pts)
+
+Looks like we're in luck this time, but it's often the case that nobody has been gracious enough to do this and you need to find clinical experts and database managers to work with in order to extract quantities of interest. The course team has done the work of running the SQL we found against the full MIMIC database and exporting the results to two csv files, called `pf.csv` and `vent.csv`. We'll use those tables to find our patients. 
+
+Load those two tables into R dataframes and use `head()` and to examine each of them. The tables are moderately sized, so don't worry if it takes a minute or two.
+```{r}
+pf <- read.csv("../hw2/data/pf.csv")
+vent <- read.csv("../hw2/data/vent.csv")
+head(pf)
+head(vent)
+```
+
+Using `dplyr` commands (perhaps with a little help from the `lubridate` package), make a dataframe of ICU stays where the patient had a stable start: i.e. they did not have any P/F ratios under 250 for the first 12 hours of their ventilation. Use `p_charttime` as the time of the P/F ratio measurement (given what you know about Pao2 and Fio2 measurements, think about why that makes sense). Exclude ICU stays without P/F ratio measurements in the first 12 hours of ventilation. Our code to do this is a chain of 7 `dplyr` commands. The result should be a dataframe with a single column. Use `head()` to examine it. Perhaps something has gone wrong...
+
+Identify the problem. Perhaps use `str()` to see what is going on in the intermediate results. Which variables are not represented correctly?
+
