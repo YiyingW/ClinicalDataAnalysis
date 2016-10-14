@@ -55,13 +55,42 @@ Looks like we're in luck this time, but it's often the case that nobody has been
 
 Load those two tables into R dataframes and use `head()` and to examine each of them. The tables are moderately sized, so don't worry if it takes a minute or two.
 ```{r}
-pf <- read.csv("../hw2/data/pf.csv")
-vent <- read.csv("../hw2/data/vent.csv")
+pf <- read.csv("../hw2/data/pf.csv", stringsAsFactors = FALSE)
+vent <- read.csv("../hw2/data/vent.csv", stringsAsFactors = FALSE)
 head(pf)
 head(vent)
 ```
 
 Using `dplyr` commands (perhaps with a little help from the `lubridate` package), make a dataframe of ICU stays where the patient had a stable start: i.e. they did not have any P/F ratios under 250 for the first 12 hours of their ventilation. Use `p_charttime` as the time of the P/F ratio measurement (given what you know about Pao2 and Fio2 measurements, think about why that makes sense). Exclude ICU stays without P/F ratio measurements in the first 12 hours of ventilation. Our code to do this is a chain of 7 `dplyr` commands. The result should be a dataframe with a single column. Use `head()` to examine it. Perhaps something has gone wrong...
 
+**MY THOUGHTS**
+
+* from vent table, for each (icustay_id, ventnum) pair, find out the 12 hour interval [start, end]
+    + for each icustay_id, use the first start time as start, start + 12 hour as end
+* In pf table, for each icustay_id, fiter out the entries that is not in this range
+* group by icustay_id, 
+    + check if the minimum pf in each group is larger than or equal to 250
+
 Identify the problem. Perhaps use `str()` to see what is going on in the intermediate results. Which variables are not represented correctly?
+
+```{r}
+icu_ids <- 
+vent %>%
+  filter(ventnum ==1) %>%
+  mutate(start = as.POSIXct(starttime)) %>%
+  mutate(end = start + 12*60*60) %>%
+  select(icustay_id, start, end) %>%
+  inner_join(pf, by='icustay_id') %>%
+  mutate(pf_time = as.POSIXct(p_charttime, format = "%Y-%m-%d %H:%M:%S")) %>%
+  filter(pf_time >= start & pf_time <= end) %>%
+  group_by(icustay_id) %>%
+  summarise(minimum = min(pfratio)) %>%
+  filter(minimum >= 250) %>%
+  select(icustay_id)
+  
+```
+
+
+
+
 
