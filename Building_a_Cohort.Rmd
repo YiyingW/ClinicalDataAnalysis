@@ -6,10 +6,22 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+```{r}
+rm(list==ls())
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+
+Sys.setenv(TZ='UTC')
+
+```
+
 
 ### Loading Data
 
-----
+
 ##### 1.1 (5 pts)
 
 The first part of any patient-level study is identify the patients who are relevant to the study, and at what point during their records they became eligible. Typically, this is done with a set of "inclusion critera", which, if met, qualify the patient for inclusion. In our study, we will consider the following inclusion criteria based on [this study](http://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=4649796):
@@ -55,8 +67,8 @@ Looks like we're in luck this time, but it's often the case that nobody has been
 
 Load those two tables into R dataframes and use `head()` and to examine each of them. The tables are moderately sized, so don't worry if it takes a minute or two.
 ```{r}
-pf <- read.csv("../hw2/data/pf.csv", stringsAsFactors = FALSE)
-vent <- read.csv("../hw2/data/vent.csv", stringsAsFactors = FALSE)
+pf <- read.csv("../hw2/data/pf.csv", as.is = TRUE)
+vent <- read.csv("../hw2/data/vent.csv", as.is =TRUE)
 head(pf)
 head(vent)
 ```
@@ -81,7 +93,7 @@ vent %>%
   mutate(end = start + 12*60*60) %>%
   select(icustay_id, start, end) %>%
   inner_join(pf, by='icustay_id') %>%
-  mutate(pf_time = as.POSIXct(p_charttime, format = "%Y-%m-%d %H:%M:%S")) %>%
+  mutate(pf_time = as.POSIXct(p_charttime)) %>%
   filter(pf_time >= start & pf_time <= end) %>%
   group_by(icustay_id) %>%
   summarise(minimum = min(pfratio)) %>%
@@ -90,6 +102,56 @@ vent %>%
   
 ```
 
+I will use this version for now. There are 5347 rows.
+
+
+icustay_id = 205992, it's first pfratio reading is earlier than the ventilation start time. 
+an alternative understanding: set the start time to be the smaller of the (first measurement time, ventilation starttime) => 
+```{r}
+icu_ids2 <-
+vent %>%
+  inner_join(pf, by='icustay_id') %>%
+  group_by(icustay_id) %>%
+  mutate(p_smallest = min(as.POSIXct(p_charttime))) %>%
+  mutate(start = pmin(p_smallest, as.POSIXct(starttime))) %>%
+  mutate(end = start + 12*60*60) %>%
+  filter(as.POSIXct(p_charttime) >= start & as.POSIXct(p_charttime) <= end) %>%
+  summarise(minimum = min(pfratio)) %>%
+  filter(minimum > 250) %>%
+  select(icustay_id)
+```
+
+
+### Cohort Building
+
+##### 1.5 (10 pts)
+
+Now we're going to do a bit of tricky table manipulation to find those stable-start ICU stays (what we did above) for which the patients additionally had a longer-than 3-hour period during which their P/F ratios remained under 300. There are a few different steps and it can seem complicated if you're not used to thinking about data in terms of tables, so we'll go through it incrementally. First we will find all the PF measurements that are under 300 and happened 12 hours or more after the beginning of ventillation, but before the end of ventillation. Then we will build 3-hour long windows, starting with the measurements identified, and using a join with the original measurements we will see if any measurements in the window go above 300. If they do not, then that patient's stay in the ICU satisfies the inclusion criteria.
+
+The first step is to find the times of all of the PF measurements that are under 300 and happened 12 hours or more after the beginning of ventilation, but before the end of ventilation. Use `dplyr` commands to create this dataframe. It should have the columns `icustay_id` and `p_charttime`.
+
+How many rows does your table have?  => 12178
+```{r}
+pf_under300 <-
+  vent %>%
+    inner_join(icu_ids, by = "icustay_id") %>%  # only care about the icustays that have a stable first 12 hours
+    filter(ventnum==1) %>%
+    transmute(icustay_id, start_after12 = as.POSIXct(starttime) + 12*60*60, end = as.POSIXct(endtime)) %>%
+    filter(end > start_after12) %>%
+    inner_join(select(pf, icustay_id, p_charttime, pfratio), by = "icustay_id") %>%
+    filter(p_charttime > start_after12, p_charttime < end, pfratio < 300) %>%
+    select(icustay_id, p_charttime)
+  
+```
+
+
+##### 1.6 (20 pts)
+
+Using a self-join, we will build the shortest possible time windows that begin and end with two PF values under 300 and which are longer than 3 hours. Using a join with the original measurements we will see if any measurements in the windows go above 300, and remove those windows that do.
+
+Implement this using dplyr commands. The result should be a dataframe with three columns: `icustay_id`, `window_begin`, and `window_end`. The last two columns should be datetimes indicating the periods (windows) during that ICU stay during which there were no PF measurements made above 300.
+
+How many rows does the result have?
 
 
 
