@@ -120,6 +120,43 @@ time_window_noabove300 <-
   
 
 # 1.7 Plot things every once in a while as a sanity check
+# join tables to create the dataframe for plot, join by icustay_id
+# 1. icustay_id, window_begin, window_end, p_charttime, pfratio, 
+# 2. filter, only keep the rows that p_charttime is in inclusive range of window_begin and window_end
+# 3. create a new column, isWindow, to indicate if the p_charttime in a row is window border (1) or not (0)
+# 4. select columns, icustay_id, p_charttime, isWindow, pfratio
+# 5. join with vent start+12 hour table so that the plot table has a column for the start of ventilation time plus 12 hours
+
+df_to_plot <-
+  time_window_noabove300 %>%
+  ungroup() %>%
+  inner_join(pf_after12hour, by='icustay_id') %>%
+  filter(p_charttime >= window_begin, p_charttime <= window_end) %>%
+  mutate(WindowBorder = ifelse(p_charttime == window_begin | p_charttime == window_end, 'yes', 'no')) %>%
+  inner_join(time12_andabove, by='icustay_id') %>%
+  select(icustay_id, p_charttime, pfratio, WindowBorder, hour12_timepoint, ventend)
+
+icu_ids_9 <- c(200059, 200109, 200249, 200250, 200364, 200387, 200438, 200569, 200639)
+df_to_plot_9 <- df_to_plot %>% filter(icustay_id == 200059|icustay_id == 200109|icustay_id == 200249|
+                                        icustay_id == 200250|icustay_id == 200364|icustay_id == 200387|
+                                        icustay_id == 200438|icustay_id == 200569|icustay_id == 200639)
+df_to_plot_9$icustay_id <- as.factor(df_to_plot_9$icustay_id)
+df_to_plot_9$WindowBorder <- as.factor(df_to_plot_9$WindowBorder)
+dummy <- df_to_plot_9 %>% select(icustay_id, hour12_timepoint) %>% mutate(p_charttime=hour12_timepoint, pfratio=300) %>% group_by(icustay_id)
+
+g <- ggplot(df_to_plot_9, aes(x=p_charttime, y=pfratio))
+g+geom_point(aes(color=WindowBorder))+ 
+  geom_vline(aes(xintercept=as.numeric(df_to_plot_9$hour12_timepoint)),df_to_plot_9, color='green') + 
+  geom_hline(yintercept = 300) +
+  facet_wrap(~icustay_id, scales = "free_x", shrink=FALSE) +
+  geom_blank(data = dummy) +
+  xlab("datetime") + ylab("PF ratio") +
+  scale_x_datetime() + 
+  theme(axis.text.x=element_text(angle = -30, hjust = 0))
+
+
+
+
 
 
 
