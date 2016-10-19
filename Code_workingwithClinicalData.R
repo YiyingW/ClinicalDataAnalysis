@@ -136,10 +136,9 @@ df_to_plot <-
   inner_join(time12_andabove, by='icustay_id') %>%
   select(icustay_id, p_charttime, pfratio, WindowBorder, hour12_timepoint, ventend)
 
+# filter(package %in% pkgname)
 icu_ids_9 <- c(200059, 200109, 200249, 200250, 200364, 200387, 200438, 200569, 200639)
-df_to_plot_9 <- df_to_plot %>% filter(icustay_id == 200059|icustay_id == 200109|icustay_id == 200249|
-                                        icustay_id == 200250|icustay_id == 200364|icustay_id == 200387|
-                                        icustay_id == 200438|icustay_id == 200569|icustay_id == 200639)
+df_to_plot_9 <- df_to_plot %>% filter(icustay_id %in% icu_ids_9)
 df_to_plot_9$icustay_id <- as.factor(df_to_plot_9$icustay_id)
 df_to_plot_9$WindowBorder <- as.factor(df_to_plot_9$WindowBorder)
 dummy <- df_to_plot_9 %>% select(icustay_id, hour12_timepoint) %>% mutate(p_charttime=hour12_timepoint, pfratio=300) %>% group_by(icustay_id)
@@ -154,14 +153,61 @@ g+geom_point(aes(color=WindowBorder))+
   scale_x_datetime() + 
   theme(axis.text.x=element_text(angle = -30, hjust = 0))
 
+# 1.8 Find the point in time at which the clinician would have concluded that the patient was experiencing the
+# condition. The index time is the end of the first window for each patient. 
+# In time_window_noabove300 table, group_by icustay_id, find the minimum window end for each icustay_id
+# Integrate with icustays.csv, output dataframe having three columns, icustay_id, subject_id, index_time
+# If a patient has more than one ICU stay, only use the first
+icustays <- read.csv("../hw2/data/icustays.csv", as.is = TRUE)
+icu_subject <- icustays %>% select(icustay_id, subject_id)
+icu_sub_index <- 
+  time_window_noabove300 %>%
+  group_by(icustay_id) %>%
+  mutate(index_time = min(window_end)) %>%  # create a new variable index_time, it equals to window_end
+  select(icustay_id, index_time) %>%  
+  distinct(.keep_all=TRUE) %>%   # remove duplicates 
+  inner_join(icu_subject, by='icustay_id') %>%  
+  arrange(subject_id) %>%  
+  group_by(subject_id) %>%  # for patients have more than one icu, only keep the first
+  top_n(1, icustay_id)
+# subject 117 in my cohort but not in cohort.csv. After inspection, subject 117 has icustay_id 217966, after
+# looking at data for icu 217966, i think it should be included in cohort.
 
+# 2 Building a Patient-Feature Matrix for this Cohort
+cohort <- read.csv("../hw2/data/cohort.csv", as.is = TRUE)
+# 2.1
+diagnoses_icd <- read.csv("../hw2/data/diagnoses_icd.csv", as.is = TRUE)
+# 2.2 
+mystery <- read.csv("../hw2/data/mystery.csv", as.is = TRUE)
+sub_adm_dischtime <- mystery %>% select(subject_id, hadm_id, dischtime)
+sub_adm_diag <- diagnoses_icd %>%  select(subject_id, hadm_id, icd9_code)
 
+table2.2 <- 
+  cohort %>%
+  inner_join(sub_adm_dischtime, by = 'subject_id') %>%
+  inner_join(sub_adm_diag, by = c("subject_id", "hadm_id")) %>%
+  filter(dischtime <= index_time)
+  
+# 2.3 what are the top 10 most common diagnosis codes? 
+icd9_group <-
+  table2.2 %>%
+  group_by(icd9_code) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n))
 
+# 2.4 Make a plot of the number of codes that are present in N number of patients. 
+# x-axis should be the number of patients, y-axis should be the number of codes that are present in that number
+# of patients. 
 
+df_to_plot_2.4 <-
+  icd9_group %>%
+  mutate(num_of_code = n) %>%
+  group_by(num_of_code) %>%
+  summarise(n=n())
 
-
-
-
+qplot(x=num_of_code, y=n, data=df_to_plot_2.4, geom='point', xlab = 'Number of patients',
+      ylab = 'Number of codes')
+  
 
 
 
