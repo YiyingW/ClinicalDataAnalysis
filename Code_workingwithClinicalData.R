@@ -208,6 +208,59 @@ df_to_plot_2.4 <-
 qplot(x=num_of_code, y=n, data=df_to_plot_2.4, geom='point', xlab = 'Number of patients',
       ylab = 'Number of codes')
   
+# 2.5 Use ICs we have calculated in combination with SNOMED CT's concept hierarchy to aggregate ICD9 codes into their parent
+# categories within a specific IC range. 
+
+# 1. Load the files: icd9_cui.csv, child_parent_cui.csv, cui_ic.csv. 
+icd9_cui <- read.csv("../hw2/data/icd9_cui.csv", as.is = TRUE)
+child_parent_cui <- read.csv("../hw2/data/child_parent_cui.csv", as.is = TRUE)
+cui_ic <- read.csv("../hw2/data/cui_ic.csv", as.is = TRUE)
+# 2. Join icd9_cui and child_parent_cui to get all the parent concepts for each ICD9 code. How many parent concepts does ICD9
+# code 401.9 have?
+icd9_parent <- 
+  icd9_cui %>%
+  inner_join(child_parent_cui, by = c('cui'= 'child')) %>%
+  distinct()
+icd9_401.9 <- filter(icd9_parent, icd9 == 401.9)
+
+
+# 2.6 What is the range (min and max) of ICs observed in the data? What are the 10 most general CUIs?
+# Assume the data means the cui_ic table
+cui_ic %>% summarise(min_ic = min(ic))  # minimum ic is 3.263391
+cui_ic %>% summarise(max_ic = max(ic))  # maximum ic is 20.41637
+most_general_cui_10 <-
+  cui_ic %>%
+  arrange(ic) %>%
+  head(10)
+
+# 2.7 For each icd9 code, find its parent CUIs with an IC between 4 and 8, and keep only the most specific parent CUI.
+# output is a dataframe with three columns, icd9, cui, parent_cui, ic
+# 1. based on icd9_parent table, join with cui_ic table on parent cui, so that each row is icd9, cui, parent_cui, ic
+# select the rows that ic is in between 4 and 8 inclusive and if multiple exist, pick the highest ic
+
+table2.7 <-
+  icd9_parent %>%
+  inner_join(cui_ic, by=c('parent'='cui')) %>%
+  filter(ic>=4, ic<=8) %>%
+  group_by(icd9) %>%
+  filter(ic==max(ic)) %>%
+  top_n(1, cui) %>%
+  ungroup() %>%
+  transmute(icd9, cui, parent_cui = parent, ic)
+  
+
+# 2.8 Use table2.7 to replace diagnoses in the dx_cohort with their parent CUI that is in the desired IC range.
+icd9_to_cui <-
+  table2.7 %>%
+  select(icd9, parent_cui, ic) %>%
+  right_join(table2.2, by=c('icd9'='icd9_code'))
+
+
+  
+
+
+
+
 
 
 
