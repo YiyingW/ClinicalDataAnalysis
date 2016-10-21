@@ -1,7 +1,7 @@
 ##############################
 # Yiying Wang
 #############################
-
+rm(list=ls())
 # 0 load pacakges needed
 library(dplyr)
 library(tidyr)
@@ -50,8 +50,8 @@ stable_12 <-
 # 1.4 use as.POSIXct try the code again 
 first_12_hour <-  # a dataframe contains the time points for first 12 hours
   vent %>% 
-  filter(ventnum == 1) %>%
-  mutate(start_time = as.POSIXct(starttime), end_time = as.POSIXct(starttime) + 12*60*60)
+  mutate(start_time = as.POSIXct(starttime), end_time = as.POSIXct(starttime) + 12*60*60) %>%
+  select(icustay_id, start_time, end_time)
 stable_12 <- 
   pf %>%
   select(icustay_id, p_charttime, pfratio) %>%
@@ -61,8 +61,6 @@ stable_12 <-
   summarise(minimum_pf = min(pfratio)) %>%
   filter(minimum_pf > 250) %>%
   select(icustay_id)
-# 5308 rows
-
 
 # 1.5 Based on above ICU stays, find the ICU stays have an additional longer-than 3 hour period during which their PF ratio
 # remained under 300. 
@@ -73,49 +71,54 @@ stable_12 <-
 #     b) select the rows have pfratio < 300, p_charttime >= end_time, <= endtime in vent table
 # Output is a dataframe having the columns icustay_id and p_charttime
 
-time12_andabove <- # a dataframe contains the above seleted ICU and their 12 hour time point and vent endtime
+time12_andabove <- # a dataframe contains the above seleted ICU 12 hour time point, and end of ventilation time
   stable_12 %>% 
-  inner_join(filter(vent, ventnum==1), by = 'icustay_id') %>%
+  inner_join(vent, by = 'icustay_id') %>%  # icustay_id, starttime, endtime
   mutate(hour12_timepoint = as.POSIXct(starttime) + 12*60*60, ventend = as.POSIXct(endtime)) %>%
   select(icustay_id, hour12_timepoint, ventend)
-pf_under300 <-
+table1.5 <-
   pf %>%
   select(icustay_id, p_charttime, pfratio) %>%
   inner_join(time12_andabove, by = 'icustay_id') %>%
   filter(pfratio < 300, p_charttime >= hour12_timepoint, p_charttime < ventend) %>%
   select(icustay_id, p_charttime)
-# 12004 rows
+# 12064 rows
 
 # 1.6 Using a self-join, build the shortest possible time windows that begin and end with two PF values under 300 and which
 # are longer than 3 hours. 
-pf_under300 <- transmute(pf_under300, icustay_id, p_charttime = as.POSIXct(p_charttime))
-bigtable <- pf_under300 %>% inner_join(pf_under300, by='icustay_id')
+
+# Convert p_charttime in table1.5 into datetime 
+table1.5 <- transmute(table1.5, icustay_id, p_charttime = as.POSIXct(p_charttime))
+# Self-join table1.5
+bigtable <- table1.5 %>% inner_join(table1.5, by='icustay_id')
+# Find all time intervals that are longer than 3 hours
 bigtable_over3 <- bigtable %>% filter(p_charttime.y - p_charttime.x > 3*60*60)
-time_windows <- 
+# Of all the time periods that are longer than 3 hours, find the smallest possible ones
+table1.6a <- 
   bigtable_over3 %>% 
   group_by(icustay_id, p_charttime.x) %>% 
-  filter(min_rank(p_charttime.y)<=1) %>% 
+  filter(min_rank(p_charttime.y)<=1) %>% # if start at the same time, keep the one that end time is smallest.
   group_by(icustay_id, p_charttime.y) %>% 
-  filter(min_rank(desc(p_charttime.x))<=1) %>%
-  rename(window_begin = p_charttime.x, window_end = p_charttime.y)
+  filter(min_rank(desc(p_charttime.x))<=1) %>% # if end at the same time, keep the one that start time is largest
+  rename(window_begin = p_charttime.x, window_end = p_charttime.y) # give the columns proper names
 
-# 8378 rows
+# 8424 rows
 
 # Using a join with the original measurements we will see if any measurements in the windows
 # go above 300, and remove those windows that do.
-pf_after12hour <- 
+pf_after12hour <- # a dataframe that has data for selected ICU stays, from 12 hour time point to vent endtime
   pf %>%
   transmute(icustay_id, p_charttime = as.POSIXct(p_charttime), pfratio) %>%
   inner_join(time12_andabove, by = 'icustay_id') %>%
   filter(p_charttime >= hour12_timepoint, p_charttime < ventend) %>%
   select(icustay_id, p_charttime, pfratio)
-time_window_noabove300 <-
-  time_windows %>%
+table1.6b <-
+  table1.6a %>%
   inner_join(pf_after12hour, by='icustay_id') %>%
   filter(p_charttime >= window_begin, p_charttime <= window_end) %>%
   group_by(icustay_id, window_begin, window_end) %>%
   summarise(max_pf = max(pfratio)) %>%
-  filter(max_pf < 300) %>%  # make sure the maximum of pf in this range is less than 300
+  filter(max_pf < 300) %>%  # only take the ones that maximum pf is less than 300
   select(icustay_id, window_begin, window_end)
   
 
@@ -128,7 +131,7 @@ time_window_noabove300 <-
 # 5. join with vent start+12 hour table so that the plot table has a column for the start of ventilation time plus 12 hours
 
 df_to_plot <-
-  time_window_noabove300 %>%
+  table1.6b %>%
   ungroup() %>%
   inner_join(pf_after12hour, by='icustay_id') %>%
   filter(p_charttime >= window_begin, p_charttime <= window_end) %>%
@@ -155,23 +158,22 @@ g+geom_point(aes(color=WindowBorder))+
 
 # 1.8 Find the point in time at which the clinician would have concluded that the patient was experiencing the
 # condition. The index time is the end of the first window for each patient. 
-# In time_window_noabove300 table, group_by icustay_id, find the minimum window end for each icustay_id
+# In table1.6a table, group_by icustay_id, find the minimum window end for each icustay_id
 # Integrate with icustays.csv, output dataframe having three columns, icustay_id, subject_id, index_time
 # If a patient has more than one ICU stay, only use the first
 icustays <- read.csv("../hw2/data/icustays.csv", as.is = TRUE)
 icu_subject <- icustays %>% select(icustay_id, subject_id)
 icu_sub_index <- 
-  time_window_noabove300 %>%
+  table1.6a %>%
   group_by(icustay_id) %>%
   mutate(index_time = min(window_end)) %>%  # create a new variable index_time, it equals to window_end
   select(icustay_id, index_time) %>%  
   distinct(.keep_all=TRUE) %>%   # remove duplicates 
   inner_join(icu_subject, by='icustay_id') %>%  
-  arrange(subject_id) %>%  
   group_by(subject_id) %>%  # for patients have more than one icu, only keep the first
-  top_n(1, icustay_id)
-# subject 117 in my cohort but not in cohort.csv. After inspection, subject 117 has icustay_id 217966, after
-# looking at data for icu 217966, i think it should be included in cohort.
+  arrange(icustay_id) %>% 
+  top_n(1, desc(icustay_id))
+
 
 # 2 Building a Patient-Feature Matrix for this Cohort
 cohort <- read.csv("../hw2/data/cohort.csv", as.is = TRUE)
@@ -180,32 +182,39 @@ diagnoses_icd <- read.csv("../hw2/data/diagnoses_icd.csv", as.is = TRUE)
 # 2.2 
 mystery <- read.csv("../hw2/data/mystery.csv", as.is = TRUE)
 sub_adm_dischtime <- mystery %>% select(subject_id, hadm_id, dischtime)
-sub_adm_diag <- diagnoses_icd %>%  select(subject_id, hadm_id, icd9_code)
+sub_adm_diag_icu <- diagnoses_icd %>% select(subject_id, hadm_id, icd9_code, icustay_id)
 
 table2.2 <- 
   cohort %>%
-  inner_join(sub_adm_dischtime, by = 'subject_id') %>%
-  inner_join(sub_adm_diag, by = c("subject_id", "hadm_id")) %>%
-  filter(dischtime <= index_time)
+  inner_join(sub_adm_diag_icu, by = c("subject_id", "icustay_id")) %>%
+  inner_join(sub_adm_dischtime, by = c('subject_id', 'hadm_id')) %>%
+  filter(dischtime <= index_time) %>% # diagnoses occur before the index time
+  rename(diagnosis_time = dischtime, diagnosis = icd9_code) %>%
+  select(subject_id, diagnosis_time, diagnosis, index_time)
   
 # 2.3 what are the top 10 most common diagnosis codes? 
 icd9_group <-
   table2.2 %>%
-  group_by(icd9_code) %>%
+  group_by(diagnosis) %>%
   summarise(n=n()) %>%
   arrange(desc(n))
+  
+icd9_top_10 <- icd9_group %>% head(10)
 
 # 2.4 Make a plot of the number of codes that are present in N number of patients. 
 # x-axis should be the number of patients, y-axis should be the number of codes that are present in that number
 # of patients. 
 
+
+
 df_to_plot_2.4 <-
   icd9_group %>%
-  mutate(num_of_code = n) %>%
-  group_by(num_of_code) %>%
-  summarise(n=n())
+  rename(code_appear_times = n) %>% 
+  group_by(code_appear_times) %>%
+  summarise(n=n()) # n is number of patients
 
-qplot(x=num_of_code, y=n, data=df_to_plot_2.4, geom='point', xlab = 'Number of patients',
+# the number of codes that appear in m patients is same as how many times the code appears
+qplot(x=code_appear_times, y=n, data=df_to_plot_2.4, geom='point', xlab ='Number of patients',
       ylab = 'Number of codes')
   
 # 2.5 Use ICs we have calculated in combination with SNOMED CT's concept hierarchy to aggregate ICD9 codes into their parent
@@ -253,7 +262,7 @@ table2.7 <-
 icd9_to_cui <-
   table2.7 %>%
   select(icd9, parent_cui, ic) %>%
-  right_join(table2.2, by=c('icd9'='icd9_code'))
+  inner_join(table2.2, by=c('icd9'='diagnosis'))
 
 
   
