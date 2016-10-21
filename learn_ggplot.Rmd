@@ -1,0 +1,78 @@
+---
+title: "Learn_ggplot"
+author: "Yiying"
+date: "October 21, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Recreate Plots
+
+This is an excercise following the book R for Data Science. This is to recreate the plots in section
+3.6 excercise.
+```{r message=FALSE}
+library(ggplot2)
+library(dplyr)
+```
+
+Have a look at the data:
+```{r}
+head(mpg)
+```
+
+plot1:
+```{r}
+ggplot(data=mpg,mapping=aes(x=displ, y=hwy)) +
+  geom_point() +
+  geom_smooth(se=FALSE)
+
+```
+
+plot2:
+```{r}
+ggplot(data=mpg) +
+  geom_point(mapping=aes(x=displ, y=hwy), size=5) +
+  geom_smooth(mapping=aes(x=displ, y=hwy, group=drv), se=FALSE, size=3)
+
+```
+
+plot3
+```{r}
+ggplot(data=mpg, mapping=aes(x=displ, y=hwy, color=drv)) +
+  geom_point(size=3)+
+  geom_smooth(se=FALSE, size=3)
+
+```
+
+plot4
+```{r}
+ggplot(data=mpg)+
+  geom_point(mapping=aes(x=displ, y=hwy, color=drv), size=3)+
+  geom_smooth(mapping=aes(x=displ, y=hwy), se=FALSE, size=3)
+
+```
+
+plot5
+```{r}
+ggplot(data=mpg)+
+  geom_point(mapping=aes(x=displ, y=hwy, color=drv), size=3)+
+  geom_smooth(mapping=aes(x=displ, y=hwy, linetype=drv), se=FALSE, size=3)
+
+```
+
+plot6
+```{r}
+ggplot(data=mpg)+
+  geom_point(mapping=aes(x=displ, y=hwy, fill=drv), color='white',size=3, shape=21, stroke=3)
+
+```
+
+
+
+
+
+
+
