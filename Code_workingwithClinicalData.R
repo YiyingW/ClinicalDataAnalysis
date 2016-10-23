@@ -50,13 +50,14 @@ stable_12 <-
 # 1.4 use as.POSIXct try the code again 
 first_12_hour <-  # a dataframe contains the time points for first 12 hours
   vent %>% 
-  mutate(start_time = as.POSIXct(starttime), end_time = as.POSIXct(starttime) + 12*60*60) %>%
-  select(icustay_id, start_time, end_time)
+  mutate(start_time = as.POSIXct(starttime), start_plus_12 = as.POSIXct(starttime) + 12*60*60) %>%
+  select(icustay_id, start_time, start_plus_12)
+
 stable_12 <- 
   pf %>%
   select(icustay_id, p_charttime, pfratio) %>%
   inner_join(first_12_hour, by = 'icustay_id') %>%
-  filter(as.POSIXct(p_charttime) >= start_time, as.POSIXct(p_charttime) <= end_time) %>%
+  filter(as.POSIXct(p_charttime) >= start_time, as.POSIXct(p_charttime) < start_plus_12) %>%
   group_by(icustay_id) %>%
   summarise(minimum_pf = min(pfratio)) %>%
   filter(minimum_pf > 250) %>%
@@ -81,8 +82,7 @@ table1.5 <-
   select(icustay_id, p_charttime, pfratio) %>%
   inner_join(time12_andabove, by = 'icustay_id') %>%
   filter(pfratio < 300, p_charttime >= hour12_timepoint, p_charttime < ventend) %>%
-  select(icustay_id, p_charttime)
-# 12064 rows
+  select(icustay_id, p_charttime) 
 
 # 1.6 Using a self-join, build the shortest possible time windows that begin and end with two PF values under 300 and which
 # are longer than 3 hours. 
@@ -158,13 +158,13 @@ g+geom_point(aes(color=WindowBorder))+
 
 # 1.8 Find the point in time at which the clinician would have concluded that the patient was experiencing the
 # condition. The index time is the end of the first window for each patient. 
-# In table1.6a table, group_by icustay_id, find the minimum window end for each icustay_id
+# In table1.6b table, group_by icustay_id, find the minimum window end for each icustay_id
 # Integrate with icustays.csv, output dataframe having three columns, icustay_id, subject_id, index_time
 # If a patient has more than one ICU stay, only use the first
 icustays <- read.csv("../hw2/data/icustays.csv", as.is = TRUE)
 icu_subject <- icustays %>% select(icustay_id, subject_id)
 icu_sub_index <- 
-  table1.6a %>%
+  table1.6b %>%
   group_by(icustay_id) %>%
   mutate(index_time = min(window_end)) %>%  # create a new variable index_time, it equals to window_end
   select(icustay_id, index_time) %>%  
@@ -173,7 +173,6 @@ icu_sub_index <-
   group_by(subject_id) %>%  # for patients have more than one icu, only keep the first
   arrange(icustay_id) %>% 
   top_n(1, desc(icustay_id))
-
 
 # 2 Building a Patient-Feature Matrix for this Cohort
 cohort <- read.csv("../hw2/data/cohort.csv", as.is = TRUE)
@@ -188,7 +187,7 @@ table2.2 <-
   cohort %>%
   inner_join(sub_adm_diag_icu, by = c("subject_id", "icustay_id")) %>%
   inner_join(sub_adm_dischtime, by = c('subject_id', 'hadm_id')) %>%
-  filter(dischtime <= index_time) %>% # diagnoses occur before the index time
+  filter(dischtime < index_time) %>% # diagnoses occur before the index time
   rename(diagnosis_time = dischtime, diagnosis = icd9_code) %>%
   select(subject_id, diagnosis_time, diagnosis, index_time)
   
@@ -216,6 +215,10 @@ df_to_plot_2.4 <-
 # the number of codes that appear in m patients is same as how many times the code appears
 qplot(x=code_appear_times, y=n, data=df_to_plot_2.4, geom='point', xlab ='Number of patients',
       ylab = 'Number of codes')
+# Version 2, bar plot
+ggplot(data=icd9_group) +
+  geom_bar(mapping=aes(x=n)) + 
+  labs(x='Number of patients', y='Number of codes')
   
 # 2.5 Use ICs we have calculated in combination with SNOMED CT's concept hierarchy to aggregate ICD9 codes into their parent
 # categories within a specific IC range. 
@@ -231,11 +234,12 @@ icd9_parent <-
   inner_join(child_parent_cui, by = c('cui'= 'child')) %>%
   distinct()
 icd9_401.9 <- filter(icd9_parent, icd9 == 401.9)
+# 10 including itself
 
 
 # 2.6 What is the range (min and max) of ICs observed in the data? What are the 10 most general CUIs?
 # Assume the data means the cui_ic table
-cui_ic %>% summarise(min_ic = min(ic))  # minimum ic is 3.263391
+cui_ic %>% summarise(min_ic = min(ic))  # minimum ic is 0.4280127
 cui_ic %>% summarise(max_ic = max(ic))  # maximum ic is 20.41637
 most_general_cui_10 <-
   cui_ic %>%
@@ -251,11 +255,14 @@ table2.7 <-
   icd9_parent %>%
   inner_join(cui_ic, by=c('parent'='cui')) %>%
   filter(ic>=4, ic<=8) %>%
-  group_by(icd9) %>%
+  group_by(icd9) %>%  # one icd9 code can have multiple cui for it
   filter(ic==max(ic)) %>%
   top_n(1, cui) %>%
+  top_n(1, parent) %>%
   ungroup() %>%
   transmute(icd9, cui, parent_cui = parent, ic)
+# NOTE: for the case where icd9 has more than one parent cui, I keep the first one.
+
   
 
 # 2.8 Use table2.7 to replace diagnoses in the dx_cohort with their parent CUI that is in the desired IC range.
