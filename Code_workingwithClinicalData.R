@@ -354,7 +354,7 @@ cui_str <-
   distinct()
 
 # 2.12 
-# C0035327
+# C0035327      	C0549576 does not exist in data
 RSD <- 
   cui_str %>%
   filter(cui=='C0035237') %>%
@@ -370,10 +370,28 @@ cui_str <-
   rename(cui=ancestor) %>%
   distinct()
 
-# 2.12 
-# C0035327
-RSD <- 
-  cui_str %>%
-  filter(cui=='C0035237') %>%
-  filter(nchar(str)<=20)
-dict <- RSD$str
+library(stringr)
+
+first_50 <- dict[1:50]
+table2.13 <- 
+  notes %>%
+  select(row_id, subject_id, chartdate, text)
+
+add_column <- function(term){
+  str_detect(table2.13$text, term)
+}
+table2.13_final <- 
+  cbind(table2.13, sapply(first_50,add_column)) %>%
+  select(-text)
+
+# 2.14
+snomed_ct_concept_string<- cui_str
+
+
+
+
+# 2.16
+heart_rates <- read.csv("../hw2/data/heart_rates.csv", as.is = TRUE)
+
+
+
