@@ -392,6 +392,64 @@ snomed_ct_concept_string<- cui_str
 
 # 2.16
 heart_rates <- read.csv("../hw2/data/heart_rates.csv", as.is = TRUE)
+# 2.17
+# inner_join heart_rates table with cohort table
+# check if all records are good meaning chartime < index time, bad charttime > index time
+incorrect_rows <-
+  cohort %>%
+  inner_join(heart_rates, by=c('icustay_id', 'subject_id')) %>%
+  filter(charttime > index_time)
+# There is one incorrect row, filter it out
+corrected_heart_rates <-
+  cohort %>%
+  inner_join(heart_rates, by=c('icustay_id', 'subject_id')) %>%
+  filter(charttime < index_time)
+  
+# 2.18
+# One feature of interest might be the latest value of the heart rate before the index time. 
+# Use `dplyr` to make a dataframe with three columns: `subject_id`, `latest_heart_rate`, and `charttime`. 
+latest_heart_rate_table <-
+  corrected_heart_rates %>%
+  group_by(subject_id) %>%
+  filter(min_rank(desc(charttime))<=1) %>%
+  select(subject_id, valuenum, charttime) %>%
+  rename(latest_heart_rate=valuenum)
+  
+qplot(latest_heart_rate_table$latest_heart_rate, 
+      geom="histogram",
+      binwidth = 1,
+      xlab='latest heart rate'
+      )
+
+# 2.19 Make a density plot of the time difference between the latest heart rate recording 
+# and the index time.
+time_diff <-
+  corrected_heart_rates %>%
+  group_by(subject_id) %>%
+  filter(min_rank(desc(charttime))<=1) %>%
+  mutate(difference=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(charttime), units='secs')))
+ggplot(data=time_diff, aes(difference)) +
+  geom_density() +
+  labs(x='time difference (second)')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
