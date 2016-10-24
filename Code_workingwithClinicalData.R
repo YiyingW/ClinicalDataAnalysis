@@ -34,7 +34,6 @@ head(vent)
 #               d) select the icustay_id column and it is the result
 first_12_hour <- 
   vent %>% 
-  filter(ventnum == 1) %>%
   mutate(start_time = starttime, end_time = starttime + 12*60*60)
 stable_12 <- 
   pf %>%
@@ -102,7 +101,6 @@ table1.6a <-
   filter(min_rank(desc(p_charttime.x))<=1) %>% # if end at the same time, keep the one that start time is largest
   rename(window_begin = p_charttime.x, window_end = p_charttime.y) # give the columns proper names
 
-# 8424 rows
 
 # Using a join with the original measurements we will see if any measurements in the windows
 # go above 300, and remove those windows that do.
@@ -266,13 +264,78 @@ table2.7 <-
   
 
 # 2.8 Use table2.7 to replace diagnoses in the dx_cohort with their parent CUI that is in the desired IC range.
+# Noticed there are some regions in the table icd9-parent_cui table, take theese as special cases and replace
+# parent_cui id for these special cases in table 2.2 first. 
+############ Special Cases: 
+# 327 -> C1561892
+# 5401 -> C0577030
+# numbers starts with 800 - 829 -> C3872870
+# 042 -> C0042769
+
+# this is a helper function to extract the last n character from a string
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+### Convert the icd9 code in table2.2 to the format of icd9 code in table2.7
+replace_special <- table2.2
+for (i in 1:nrow(replace_special)){
+  if (replace_special[i, 'diagnosis'] == "042"){
+    replace_special[i, 'diagnosis'] = "C0042769"
+  }else if (replace_special[i, 'diagnosis'] == "5401"){
+    replace_special[i, 'diagnosis'] = "C0577030"
+  }else if (replace_special[i, 'diagnosis']=="327"){
+    replace_special[i, 'diagnosis'] = "C1561892"
+  }else if (substr(replace_special[i, 'diagnosis'], 1, 1) == '8'){
+    first_three = as.numeric(substr(replace_special[i, 'diagnosis'], 1, 3))
+    if (first_three >= 800 & first_three <= 829){
+      replace_special[i, 'diagnosis'] = "C3872870"
+    }
+  }else if (substr(replace_special[i, 'diagnosis'], 1, 1) == 'E'){
+    if (nchar(replace_special[i, 'diagnosis']) == 4){
+      replace_special[i, 'diagnosis'] = replace_special[i, 'diagnosis']
+    }else if (substrRight(replace_special[i, 'diagnosis'], 1)=="0"){
+      replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 1, 4)
+    }else{ # add a point between third and fourth digits
+      replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 1, 4), ".", substr(replace_special[i, 'diagnosis'], 5, 5), sep = "")
+    }
+  }else{ 
+    if (nchar(replace_special[i, 'diagnosis']) > 3){
+      n = nchar(replace_special[i, 'diagnosis'])
+      if (n == 5 & substr(replace_special[i, 'diagnosis'], 4, n) == '00'){
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 1, 3)
+      }else if(n == 5 & substr(replace_special[i, 'diagnosis'], 5, n) == '0'){
+        replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 1, 3), ".", substr(replace_special[i, 'diagnosis'], 4, 4), sep = "")
+      }else if (n == 4 & substr(replace_special[i, 'diagnosis'], 4, n) == '0'){
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 1, 3)
+      }else{
+        replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 1, 3), ".", substr(replace_special[i, 'diagnosis'], 4, n), sep = "")
+      }
+      if (substr(replace_special[i, 'diagnosis'], 1, 2) == '00'){
+        n = n = nchar(replace_special[i, 'diagnosis'])
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 3, n)
+      }else if(substr(replace_special[i, 'diagnosis'], 1, 1) == '0'){
+        n = nchar(replace_special[i, 'diagnosis'])
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 2, n)
+      }
+    }
+  }
+}
+# Convert icd9_code in table2.2 to the SNOMED version of icd9_code
+
 icd9_to_cui <-
-  table2.7 %>%
-  select(icd9, parent_cui, ic) %>%
-  inner_join(table2.2, by=c('icd9'='diagnosis'))
+  replace_special %>%
+  left_join(table2.7, by = c('diagnosis' = 'icd9'))
 
-
-  
+# replace diagnosis with parent_cui if parent_cui is present
+table2.8 <- icd9_to_cui
+for (i in 1:nrow(table2.8)){
+  if (!is.na(table2.8[i, 'parent_cui'])){
+    table2.8[i,'diagnosis'] <- table2.8[i,'parent_cui']
+  }
+}
+table2.8_final <-
+  table2.8 %>%
+  select(subject_id, diagnosis_time, diagnosis, index_time)
 
 
 
