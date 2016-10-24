@@ -344,6 +344,22 @@ notes <- read.csv("../hw2/data/notes.csv", as.is = TRUE)
 
 snomed_ct_isaclosure <- read.csv("../hw2/data/snomed_ct_isaclosure.csv", as.is = TRUE)
 snomed_ct_str_cui<- read.csv("../hw2/data/snomed_ct_str_cui.csv", as.is = TRUE)
+    
+des_ances <- select(snomed_ct_isaclosure, descendant, ancestor)
+cui_str <-
+  des_ances %>%
+  inner_join(snomed_ct_str_cui, by=c('descendant'='CUI')) %>%
+  select(ancestor, str) %>%
+  rename(cui=ancestor) %>%
+  distinct()
+
+# 2.12 
+# C0035327
+RSD <- 
+  cui_str %>%
+  filter(cui=='C0035237') %>%
+  filter(nchar(str)<=20)
+dict <- RSD$str
 
 # another way: 
 des_ances <- select(snomed_ct_isaclosure, descendant, ancestor)
