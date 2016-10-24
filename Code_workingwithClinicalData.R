@@ -202,7 +202,8 @@ icd9_top_10 <- icd9_group %>% head(10)
 # x-axis should be the number of patients, y-axis should be the number of codes that are present in that number
 # of patients. 
 
-
+####### NEED CHANGE #####
+# group_by code, unique the subject, count the subject, to find how many patients this code occurs, then count number 
 
 df_to_plot_2.4 <-
   icd9_group %>%
@@ -338,6 +339,11 @@ table2.8_final <-
   select(subject_id, diagnosis_time, diagnosis, index_time)
 
 
+# 2.11
+notes <- read.csv("../hw2/data/notes.csv", as.is = TRUE)
+
+snomed_ct_isaclosure <- read.csv("../hw2/data/snomed_ct_isaclosure.csv", as.is = TRUE)
+snomed_ct_str_cui<- read.csv("../hw2/data/snomed_ct_str_cui.csv", as.is = TRUE)
 
 
 
