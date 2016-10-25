@@ -338,6 +338,25 @@ table2.8_final <-
   table2.8 %>%
   select(subject_id, diagnosis_time, diagnosis, index_time)
 
+# 2.9 
+# 180 days in 6 months
+with_time_indicator <-
+  table2.8_final %>%
+  mutate(difference=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(diagnosis_time), units='days'))) %>%
+  mutate(relative_time = ifelse(difference > 180, "before6m", "in6m")) %>%
+  select(subject_id, diagnosis, relative_time)
+  
+diagnosis_matrix <- 
+  with_time_indicator %>%
+  unite(diagnosis_relativetime, diagnosis, relative_time) %>%
+  group_by(subject_id, diagnosis_relativetime) %>%
+  mutate(n=n()) %>%
+  ungroup() %>%
+  distinct() %>% 
+  spread(key=diagnosis_relativetime, value=n)
+diagnosis_matrix[is.na(diagnosis_matrix)] <- 0
+  
+
 
 # 2.11
 notes <- read.csv("../hw2/data/notes.csv", as.is = TRUE)
@@ -354,21 +373,13 @@ cui_str <-
   distinct()
 
 # 2.12 
-# C0035327      	C0549576 does not exist in data
+# C0035204
 RSD <- 
   cui_str %>%
-  filter(cui=='C0035237') %>%
+  filter(cui=='C0035204') %>%
   filter(nchar(str)<=20)
 dict <- RSD$str
 
-# another way: 
-des_ances <- select(snomed_ct_isaclosure, descendant, ancestor)
-cui_str <-
-  des_ances %>%
-  inner_join(snomed_ct_str_cui, by=c('descendant'='CUI')) %>%
-  select(ancestor, str) %>%
-  rename(cui=ancestor) %>%
-  distinct()
 
 library(stringr)
 
@@ -385,10 +396,50 @@ table2.13_final <-
   select(-text)
 
 # 2.14
-snomed_ct_concept_string<- cui_str
+patients_with_term <-
+  table2.13_final %>%
+  select(`inhalation injury`:`fryns syndrome`) %>%
+  mutate(hasTerm = rowSums(.)) %>% 
+  select(hasTerm) %>%
+  bind_cols(table2.13_final,.) %>%
+  filter(hasTerm != 0)
+first_three_cols <- patients_with_term[,1:3]
+terms_with_true <-
+  patients_with_term %>%
+  select(4:53)
+terms_with_true_filtered <- terms_with_true[,colSums(terms_with_true) > 0]
+simplified_patients_terms <- cbind(first_three_cols, terms_with_true_filtered)
 
+sub_chartdate_concept <- data.frame(subject_id=integer(),
+                                    chartdate=character(),
+                                    concept=character(), as.is=FALSE)
+for (i in 1:nrow(simplified_patients_terms)){
+  subject <- simplified_patients_terms[i,'subject_id']
+  date <- simplified_patients_terms[i,'chartdate']
+  for (j in 4:ncol(simplified_patients_terms)){
+    if (simplified_patients_terms[i,j]==TRUE){
+      term <- colnames(patients_with_term)[j]
+      concepts <-
+        (cui_str %>%
+           filter(str==term))$cui
+      for (k in 1:length(concepts)){
+        concept <- concepts[k]
+        thisrow <- data.frame(subject_id=subject, chartdate=date, concept=concept, stringsAsFactors = FALSE)
+        sub_chartdate_concept<- bind_rows(sub_chartdate_concept, thisrow)
+      }
+    }
+  }
+}
 
-
+# 2.15 
+note_matrix <-
+  sub_chartdate_concept %>%
+  select(subject_id, concept) %>%
+  distinct() %>%
+  group_by(subject_id, concept) %>%
+  mutate(n=n()) %>%
+  spread(key=concept, value=n)
+note_matrix[is.na(note_matrix)] <- 0
 
 # 2.16
 heart_rates <- read.csv("../hw2/data/heart_rates.csv", as.is = TRUE)
@@ -432,14 +483,25 @@ ggplot(data=time_diff, aes(difference)) +
   geom_density() +
   labs(x='time difference (second)')
 
+# 2.20
+weighted_HR <-
+  corrected_heart_rates[complete.cases(corrected_heart_rates),] %>%
+  mutate(diff=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(charttime), units='hours'))) %>%
+  mutate(w=exp(-diff-1)) %>%
+  mutate(xw=valuenum*w) %>%
+  select(subject_id, xw, w) %>%
+  group_by(subject_id) %>%
+  summarise_each(funs(sum)) %>%
+  mutate(time_wt_avg=xw/w) %>%
+  select(subject_id, time_wt_avg)
 
-
-
-
-
-
-
-
+# 2.21
+latest_avg <-
+  latest_heart_rate_table %>%
+  select(subject_id, latest_heart_rate) %>%
+  inner_join(weighted_HR, by='subject_id')
+ggplot(data=latest_avg) +
+  geom_point(mapping=aes(x=latest_heart_rate, y=time_wt_avg))
 
 
 
