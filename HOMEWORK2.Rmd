@@ -1,0 +1,863 @@
+---
+output: pdf_document
+---
+
+# Homework 2: Working with Clincal Data
+
+BIOMEDIN 215 (Data Driven Medicine), Fall 2016
+
+Due: Thursday, October 27, 2016
+
+In this assignment you will gain experience extracting and trasforming clinical data from the state it is stored in into datasets for later statistical analysis. You will practice using common time-saving tools in the `R` programming language that are ideally suited to these tasks. 
+
+You will use the [MIMIC III database](https://mimic.physionet.org/mimictables/patients/) as a sandbox to create a dataset describing patients in the intensive care unit whose respiratory function rapidly deteriorated while under [mechanical ventilation](https://en.wikipedia.org/wiki/Mechanical_ventilation). P/F ratio referes to a ratio of Pao2 (arterial oxygen partial pressure) and Fio2 (fractional inspired oxygen), which is how much oxygen is reaching the patient's blood relative to how much is being artificially supplied by the mechanical ventillator. All of the data you need for this assignment is here, or can be found in the files section of Canvas.
+
+Please edit this document directly using either Jupyter Notebook or R markdown in R Studio and answer each of these questions in-line. Jupyter and R markdown are useful tools for reproducible research that you will use over and over again in your later work. They are worth taking the short amount of time necessary to learn them. Turn in a single `.pdf` document showing all of your code and output for the entire assignment, with each question clearly demarcated. Submit your completed assignment through Canvas.
+
+## 0. Getting Ready
+
+a) The first thing we need to do is load all of the packages we will use for this assignment. Please load the packages `dplyr`, `tidyr`, `lubridate`, `stringr`, and `ggplot2`. Also, please run the command `Sys.setenv(TZ='UTC')`. Without it, your date-time data will misbehave. 
+```{r message=FALSE}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+Sys.setenv(TZ='UTC')
+```
+
+
+## 1. Building a Cohort Based on Inclusion Criteria
+
+### Loading Data
+
+##### 1.1 (5 pts)
+
+The first part of any patient-level study is identify the patients who are relevant to the study, and at what point during their records they became elligible. Typically, this is done with a set of "inclusion critera", which, if met, qualify the patient for inclusion. In our study, we will consider the following inclusion criteria based on http://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=4649796: 
+- Patients who were on mechanical ventilation
+- and have a P/F ratio > 250 for first 12 hours of ventilation
+- After at least the initial 12 hour period, P/F ratio drops below 300 and remains below 300 for > 3 hours
+
+The process of identifying patients who meet certain clinical criteria is sometimes refered to as _electronic phenotyping_.
+
+It seems that to do this, we will need to know who was on _mechanical ventilaion_ and what their _P/F ratios_ were over time. We need to find if and where those are recorded in the database by seeing if there is an internal code or ID assigned to them. Using the MIMIC docomumentation, determine what table(s) in MIMIC you would query to find out if and where mechanical ventillation or P/F ratios would be recorded. 
+
+**MY ANWSER:**
+I would query table CHARTEVENTS to filter out patients' ICU stays in which mechanical ventilations were performed. The query can be made based on ITEMID value which is an identifier for a single measurement type in the database. The presense of various measurements (for example, inspiratory pressure, minute volume, PCV value) is an indication that the patient was on mechanical ventilation. P/F ratio is the ratiom of Pao2 value and Fio2 value. Pao2 and Fio2 value can also be found in CHARTEVENT by querying on ITEMID. ITEMID of 490 and 779 indicates a measurement of Pao2. ITEMID of 189, 190, 2981, 7570 and 3420 indicates a measurement of FiO2. 
+
+##### 1.2 *(5 pts)*
+
+If you search that table using the measurement label and find counts of the measurements (from other tables) of the relevant results, we see that the duration of mechanical ventilation is not specified and P/F measurements are not directly recorded. However, there may be a way to create this data from what we do have. If we're lucky, other researchers have already done this work for us, most likely using SQL. 
+
+Search the web for _SQL_ that uses _MIMIC_ data to compute _mechanical ventilation duration_ and for _SQL_ to compute the _Pao2 Fao2 ratio_. Report the URLs of the sources you find. 
+
+**MY ANWSER:**
+https://github.com/MIT-LCP/mimic-code/blob/master/etc/ventilation-durations.sql  
+https://github.com/MIT-LCP/mimic-cookbook/blob/master/postgres/sofa_score_inserts.sql
+
+##### 1.3 *(5 pts)*
+
+Looks like we're in luck this time, but it's often the case that nobody has been gracious enough to do this and you need to find clinical experts and database managers to work with in order to extract quantities of interest. The course team has done the work of running the SQL we found against the full MIMIC database and exporting the results to two csv files, called `pf.csv` and `vent.csv`. We'll use those tables to find our patients. 
+
+Load those two tables into R dataframes and use `head()` and to examine each of them. The tables are moderately sized, so don't worry if it takes a minute or two.
+```{r}
+pf <- read.csv("../hw2/data/pf.csv", as.is = TRUE)
+head(pf)
+vent <- read.csv("../hw2/data/vent.csv", as.is =TRUE)
+head(vent)
+```
+
+
+Using `dplyr` commands, make a dataframe of ICU stays where the patient had a stable start: i.e. they did not have any P/F ratios under 250 for the first 12 hours of their ventilation. Use `p_charttime` as the time of the P/F ratio measurement (given what you know about Pao2 and Fio2 measurements, think about why that makes sense). Exclude ICU stays without P/F ratio measurements in the first 12 hours of ventilation, and ignore P/F measurements that appear to be taken while the patient was not ventilated. The result should be a dataframe with a single column. Use `head()` to examine it. Perhaps something has gone wrong...
+
+Identify the problem. Perhaps use `str()` to see what is going on in the intermediate results. Which variables are not represented correctly?
+
+**MY ANWSER:**
+Yes, something went wrong. The p_charttime, starttime and endtime stored in the tables are in character type so I couldn't compare them directly or add 12 hours by using plus sign directly. I am not showing the buggy code here because the presence of not-working code would prevent R markdown file from creating PDF. 
+
+##### 1.4 (5 pts)
+
+Solve the problem using `as.POSIXct` and one or two other functions. Try your code again from above to find the ICU stays where the patient had a stable start. The result should be a dataframe with a single column.
+```{r}
+# use vent table to extract the start_time of ventilation and calculate the 12 hour 
+# point after the start of ventilation for each icustay
+first_12_hour <-  
+  vent %>% 
+  mutate(start_time = as.POSIXct(starttime), start_plus_12 = as.POSIXct(starttime) + 
+           12*60*60) %>%
+  select(icustay_id, start_time, start_plus_12)
+
+# a table containing the icustay_ids for icustay that has a stable first 12 hours
+stable_12 <- 
+  pf %>%
+  select(icustay_id, p_charttime, pfratio) %>%
+  mutate(p_charttime=as.POSIXct(p_charttime)) %>%
+  inner_join(first_12_hour, by = 'icustay_id') %>%
+  filter(p_charttime>=start_time, p_charttime<start_plus_12) %>%
+  group_by(icustay_id) %>%
+  summarise(minimum_pf = min(pfratio)) %>%
+  filter(minimum_pf > 250) %>%
+  select(icustay_id)
+
+nrow(stable_12)
+```
+
+How many ICU stays are there in your final list?  
+**MY ANWSER:**
+5260.
+
+### Cohort Building
+
+##### 1.5 (10 pts)
+
+Now we're going to do a bit of tricky table manipulation to find those stable-start ICU stays (what we did above) for which the patients additionally had a longer-than 3-hour period during which their P/F ratios remained under 300.
+
+If you have experience with programming and algorithms, your first intuition might be to scan each ICU stay sequentially in a loop and march forward in time through all of the P/F ratios in each ICU stay to find 3+ hour-long periods with P/F ratios all under 300. That would be a reasonable approach in `C++`, but not in `R` or in a database setting. Generally, loops should be avoided at all cost in R. Thankfully, there's a fast and idiomatic way to do this that doesn't require any more tools than those we've already been using. 
+
+This approach can seem complicated if you're not used to thinking about data in terms of tables, so we'll go through it incrementally. First we will find all the PF measurements that are under 300 and happened 12 hours or more after the beginning of ventillation, but before the end of ventillation. Then we will build 3-hour long windows, starting with the measurements identified, and using a join with the original measurements we will see if any measurements in the window go above 300. If they do not, then that patient's stay in the ICU satisfies the inclusion criteria.
+
+Continue using only the set of ICU stays that you identified above. Find the times of all of the PF measurements of people in this cohort that are under 300 and happened 12 hours or more after the beginning of ventilation, but before the end of ventilation. Use `dplyr` commands to create this dataframe. It should have the columns `icustay_id` and `p_charttime`.
+
+```{r}
+# a dataframe contains the above seleted stable start icustays' 12 hour time point, 
+# and end of ventilation time
+time12hr_andabove <- 
+  stable_12 %>% 
+  inner_join(vent, by='icustay_id') %>%  # icustay_id, starttime, endtime
+  mutate(hour12_timepoint=as.POSIXct(starttime)+12*60*60, ventend=as.POSIXct(endtime)) %>%
+  select(icustay_id, hour12_timepoint, ventend)
+under300 <-
+  pf %>%
+  select(icustay_id, p_charttime, pfratio) %>%
+  mutate(p_charttime=as.POSIXct(p_charttime)) %>%
+  inner_join(time12hr_andabove, by='icustay_id') %>%
+  filter(pfratio<300, p_charttime>=hour12_timepoint, p_charttime<ventend) %>%
+  select(icustay_id, p_charttime) 
+
+nrow(under300)
+
+```
+
+How many rows does your table have?  
+**MY ANWSER:**
+12073.
+
+##### 1.6 (20 pts)
+
+Using a self-join, we will build the shortest possible time windows that begin and end with two PF values under 300 and which are longer than 3 hours. Using a join with the original measurements we will see if any measurements in the windows go above 300, and remove those windows that do.
+
+Implement this using dplyr commands. The result should be a dataframe with three columns: `icustay_id`, `window_begin`, and `window_end`. The last two columns should be datetimes indicating the periods (windows) during that ICU stay during which there were no PF measurements made above 300.
+```{r}
+# shortest possible time windows that begin and end with two PF under 300
+# and which are longer than 3 hours
+non_overlap_bt3hr_window <-
+  under300 %>%
+  inner_join(under300, by='icustay_id') %>%
+  filter(p_charttime.y-p_charttime.x>3*60*60) %>%
+  # if start at the same time, keep the one that end time is smallest.
+  group_by(icustay_id, p_charttime.x) %>% 
+  filter(min_rank(p_charttime.y)<=1) %>%
+  # if end at the same time, keep the one that start time is largest
+  group_by(icustay_id, p_charttime.y) %>% 
+  filter(min_rank(desc(p_charttime.x))<=1) %>% 
+  # give the columns proper names
+  rename(window_begin = p_charttime.x, window_end = p_charttime.y) 
+
+# Using a join with the original measurements we will see if any measurements in the 
+# windows go above 300, and remove those windows that do.
+# First, based on stable start icustays, filter out pfratio that are measured after
+# 12 hour point and before vent end
+pf_after12hour <- 
+  pf %>%
+  transmute(icustay_id, p_charttime=as.POSIXct(p_charttime), pfratio) %>%
+  inner_join(time12hr_andabove, by='icustay_id') %>%
+  filter(p_charttime>=hour12_timepoint, p_charttime<ventend) %>%
+  select(icustay_id, p_charttime, pfratio)
+# Then, check if any pf ratio in a window is larger than 300
+windows_no_above_300 <-
+  non_overlap_bt3hr_window %>%
+  inner_join(pf_after12hour, by='icustay_id') %>%
+  # keep the rows where p_charttime is in window
+  filter(p_charttime>=window_begin, p_charttime<=window_end) %>%
+  # for each icustay's each non-overlap window, find the maximum pfratio,
+  # if the maximum is no larger than 300, keep
+  group_by(icustay_id, window_begin, window_end) %>%
+  summarise(max_pf=max(pfratio)) %>%
+  filter(max_pf<300) %>%  
+  select(icustay_id, window_begin, window_end)
+
+nrow(windows_no_above_300)
+```
+
+
+How many rows does the result have?  
+**MY ANWSER:**
+6526.
+
+##### 1.7 (20 pts)
+
+Let's visualize what we've done so far. This should help you identify any errors that you might of made. It's often difficult to keep track of all the data manipulation, even for expert researchers! That's why it's good practice to plot things every once in a while as a sanity check.
+
+Use `ggplot` and `facet_wrap` to show the entire PF ratio trajectories of the first 9 ICU stays in your windows dataframe. Plot the datetime on the x-axis and the PF value on the y-axis. Use color to indicate PF measurements that are within or at the borders of your windows. Include a horizontal line on each plot at PF=300, and a green vertical line on each plot indicating the start of ventilation time plus 12 hours (the last example here http://docs.ggplot2.org/0.9.3.1/geom_vline.html and this question http://stackoverflow.com/questions/5388832/how-to-get-a-vertical-geom-vline-to-an-x-axis-of-class-date will come in handy). Your code may take a minute or two to run. *(20 pts)*
+
+```{r}
+df_to_plot <-
+  windows_no_above_300 %>%
+  ungroup() %>%
+  # since the table created above does not have pfratio, join and filter again
+  inner_join(pf_after12hour, by='icustay_id') %>% 
+  filter(p_charttime>=window_begin, p_charttime<=window_end) %>%
+  # create a varibale to indiate if pfratio is in window or at the boarder
+  mutate(WindowBorder=ifelse(p_charttime==window_begin|p_charttime==window_end,
+                             'yes','no')) %>%
+  # to include the 12 hour time point in data frame
+  inner_join(time12hr_andabove, by='icustay_id') %>% 
+  select(icustay_id, p_charttime, pfratio, WindowBorder, hour12_timepoint, ventend)
+
+# filter(package %in% pkgname)
+# first 9 icustay ids 
+icu_ids_9 <- c(200059, 200109, 200249, 200250, 200364, 200387, 200438, 200569, 200639)
+df_to_plot_9 <- 
+  df_to_plot %>% 
+  filter(icustay_id %in% icu_ids_9)
+
+# convert character variables to factor variables
+df_to_plot_9$icustay_id <- as.factor(df_to_plot_9$icustay_id)
+df_to_plot_9$WindowBorder <- as.factor(df_to_plot_9$WindowBorder)
+
+# the purpose of this dataframe is to make sure all 9 plots' x-axis start from their 
+# vent start. It will be used for a geom_blank function which will not plot anything. 
+# Without this function, the plots will start from their first window starts instead 
+# of vent start.
+dummy <- 
+  df_to_plot_9 %>% 
+  select(icustay_id, hour12_timepoint) %>% 
+  mutate(p_charttime=hour12_timepoint, pfratio=300) %>% 
+  group_by(icustay_id)
+
+g <- ggplot(df_to_plot_9, aes(x=p_charttime, y=pfratio))
+g+geom_point(aes(color=WindowBorder))+ 
+  geom_vline(aes(xintercept=as.numeric(df_to_plot_9$hour12_timepoint)),df_to_plot_9, 
+             color='green') + 
+  geom_hline(yintercept = 300) +
+  facet_wrap(~icustay_id, scales = "free_x", shrink=FALSE) +
+  geom_blank(data = dummy) +
+  xlab("datetime") + ylab("PF ratio") +
+  scale_x_datetime() + 
+  theme(axis.text.x=element_text(angle = -30, hjust = 0))
+
+```
+
+
+#### Constructing your final cohort data frame
+
+##### 1.8 (10 pts)
+
+We're at the last step. Now we know what patients seemed normal to start with, but later experienced a sustained drop in their PF ratios. If we're going to predict a treatment or outcome or see what treatments worked well for this kind of people, we need to establish the point in time at which the clinician would have concluded that the patient was experiencing the condition, starting the decision process of how to respond. If we don't do this, then we might accidentally use data from after the decision was made to try to predict the decision! In our case, let's say that time the end of the first window for each patient. We'll call that time the "index time" for each ICU stay.
+
+Use `dplyr`, the results from above, and the file `icustays.csv` to create a dataframe containing three columns: `subject_id`, `icustay_id` and `index_time`. Some patients (subjects) may have had multiple qualifying ICU stays, so only use the first of them.
+
+```{r}
+# read in icustays table
+icustays <- read.csv("../hw2/data/icustays.csv", as.is = TRUE)
+# extract icustay_id and subject_id
+icu_subject <- 
+  icustays %>% 
+  select(icustay_id, subject_id)
+# find index time (the end of the first window)
+icu_sub_index <- 
+  windows_no_above_300 %>%
+  group_by(icustay_id) %>%
+  # create a new variable index_time, it equals to the first window_end, so min()
+  mutate(index_time = min(window_end)) %>%  
+  select(icustay_id, index_time) %>%  
+  # remove duplicates 
+  distinct(.keep_all=TRUE) %>%   
+  inner_join(icu_subject, by='icustay_id') %>%  
+  # for patients have more than one icu, only keep the first
+  group_by(subject_id) %>%  
+  arrange(icustay_id) %>% 
+  top_n(1, desc(icustay_id))
+
+nrow(icu_sub_index)
+```
+
+
+How many ICU stays are there in the final cohort?  
+**MY ANWSER:**
+1010.
+
+## 2. Building a Patient-Feature Matrix for this Cohort
+
+Now that we know what patients are relevant to our question, we can gather up their data. In case you're still having trouble with part I, you can simply load the `cohort.csv` file at this point and use that in your analysis instead of the result you produced.
+
+### Diagnoses
+
+##### 2.1 (3 pts)
+
+Let's first deal with diagnoses. Load `diagnoses_icd.csv`. We would like to find the diagnoses that occured before the index time for each patient, but it looks like there is no time recorded in this table. 
+```{r}
+cohort <- read.csv("../hw2/data/cohort.csv", as.is = TRUE)
+diagnoses_icd <- read.csv("../hw2/data/diagnoses_icd.csv", as.is = TRUE)
+```
+
+What table in MIMIC would you use to find the times of each diagnoses? Use the online documentation to find out. *(3 pts)*  
+**MY ANWSER:**
+ADMISSION table. Specifically, the discharge time in admission table. 
+
+##### 2.2 (4 pts)
+
+This table is contained in `mystery.csv`. Load it into R and use it in conjunction with the diagnoses and cohort tables to filter the diagnoses for each patient that occured before the index date. Use the `dischtime` column as the time of diagnosis (think about why this makes sense, given that diagnoses are recored for billing). The final result should have the columns `subject_id`, `diagnosis_time`, `diagnosis`, and `index_time`.
+```{r}
+mystery <- read.csv("../hw2/data/mystery.csv", as.is = TRUE)
+# from mystery tabble, subject, admission, diagnosis time
+sub_adm_dischtime <- 
+  mystery %>% 
+  select(subject_id, hadm_id, dischtime)
+# from diagnoses_icd table, subject, admission, icd9 code, icustay id
+sub_adm_diag_icu <- 
+  diagnoses_icd %>% 
+  select(subject_id, hadm_id, icd9_code, icustay_id)
+
+
+sub_diagtime_diag_indext <- 
+  # combine all three tables
+  cohort %>%  # subject, index time, icustay id
+  inner_join(sub_adm_diag_icu, by = c("subject_id", "icustay_id")) %>%
+  inner_join(sub_adm_dischtime, by = c('subject_id', 'hadm_id')) %>%
+  # by now, table has subject_id, icustay_id, hadm_id, icd9_code, dischtime
+  # keep diagnoses occur before the index time
+  filter(dischtime<index_time) %>% 
+  rename(diagnosis_time = dischtime, diagnosis = icd9_code) %>%
+  select(subject_id, diagnosis_time, diagnosis, index_time)
+
+nrow(sub_diagtime_diag_indext)
+```
+
+
+How many rows are in the result?  
+**MY ANWSER:**
+2684.
+
+##### 2.3 (4 pts)
+What are the top 10 most common diagnosis codes (by number of patients who have had them) in the cohort from question 2.2? Google the top 3 codes and think about whether or not you think they make sense for this cohort. This is another kind of sanity check
+```{r}
+icd9_group <-
+  sub_diagtime_diag_indext %>%
+  group_by(diagnosis) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n))
+  
+icd9_top_10 <- 
+  icd9_group %>% 
+  head(10)
+icd9_top_10
+```
+
+**MY ANWSER:**
+The top 3 most common icd9 diagnosis codes are: 4280 (Congestive heart failure), 4019 (Hypertension NOS) and 42731 (Atrial fibrillation). This makes sense because patients with these problems are mostly under mechanical ventilation. 
+
+
+##### 2.4 (4 pts)
+Make a plot of the number of codes that are present in N number of patients. The x-axis should be the number of patients, and the y-axis should be the number of codes that are present in that number of patients. I.e. plot the number of codes that appear in 1 patient, then the number of codes that appear in 2 patients, etc. In one sentence, dscribe the meaning of the plot in your own words. *(4 pts)*
+```{r}
+df_to_plot_2.4 <-
+  sub_diagtime_diag_indext %>%
+  select(subject_id, diagnosis) %>% 
+  # one code might occur in a same patient multiple times, deduplicate for this
+  distinct() %>%
+  group_by(diagnosis) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n))
+
+ggplot(data=df_to_plot_2.4) +
+  geom_bar(mapping=aes(x=n)) + 
+  labs(x='Number of patients', y='Number of codes')
+
+```
+**MY ANWSER:**  
+There are a huge number of codes that only occur in one patient and there are a few codes that occur in many patients. This indicates the diagnosis codes used in the dataset might be too specific. And this can cause a sparse feature space, greatly increase the dimension. Therefore, action to deal with this problem is required. 
+
+
+##### 2.5 (2 pts)
+As you observed from the plot you created above, rare diagnoses can result in a sparse feature space. One way to manage this is to group rare features into broader categories that are more common in the data. *Information content (IC)* is a measure of specificity based on the frequency of occurrence of features that can be used in combination with a *concept hierarchy* to identify broader categories of features. 
+
+The IC of a term that occurs in a set of documents is calculated as 
+
+$log_2 \left( \frac{frequency(\text{term})}{count(\text{document})} \right)$
+
+We have adapted this equation to calculate the IC of ICD9 codes and their parent concepts from the SNOMED CT concept hierarchy, based on their occurrence in Stanford EHRs:
+
+$log_2 \left( \frac{frequency(\text{ICD9 concept and descendants})}{count(\text{patients})} \right)$
+
+In this next step, you will use ICs we have calculated in combination with SNOMED CT's concept hierarchy to aggregate ICD9 codes into their parent categories within a specific IC range.
+
+First, load the following three files in R: `icd9_cui.csv`, `child_parent_cui.csv` and `cui_ic.csv` and examine them with `head()`. `icd9_cui.csv` contains ICD9 codes and their corresponding UMLS concept unique identifier (CUI). `child_parent_cui.csv` contains the transitive closure for each ICD9 CUI - that is, the set of all parent concepts for each ICD9 CUI (including itself). `cui_ic.csv` contains the IC values for ICD9 SNOMED CT CUIs.
+```{r}
+icd9_cui <- read.csv("../hw2/data/icd9_cui.csv", as.is = TRUE)
+child_parent_cui <- read.csv("../hw2/data/child_parent_cui.csv", as.is = TRUE)
+cui_ic <- read.csv("../hw2/data/cui_ic.csv", as.is = TRUE)
+```
+
+Join `icd9_cui.csv` and `child_parent_cui.csv` to get all the parent concepts for each ICD9 code. How many parent concepts does ICD9 code 401.9 have?
+```{r}
+icd9_parent <- 
+  icd9_cui %>%
+  inner_join(child_parent_cui, by=c('cui'= 'child')) %>%
+  distinct()
+icd9_401.9 <- filter(icd9_parent, icd9==401.9)
+nrow(icd9_401.9)
+```
+**MY ANWSER:**  
+10 parent concepts including itself.
+
+
+##### 2.6 (2 pts)
+
+What is the range (min and max) of ICs observed in the cui_ic file? What are the 10 most general CUIs?
+```{r}
+cui_ic %>% summarise(min_ic = min(ic))  # minimum ic 
+cui_ic %>% summarise(max_ic = max(ic))  # maximum ic 
+most_general_cui_10 <-
+  cui_ic %>%
+  arrange(ic) %>%
+  head(10)
+most_general_cui_10
+```
+**MY ANWSER:**  
+The range of ICs is [0.4280127, 20.41637]. The 10 most general CUIs are shown as the output above.
+
+##### 2.7 (3 pts)
+
+For each ICD9 code, find its parent CUIs with an IC between 4 and 8, and keep only the most specific parent CUI. The result should be a table with the rows `icd9`, `cui`, `parent_cui` (the most specific parent cui with an IC between 4 and 8) and `ic` (which should be between 4 and 8).
+```{r}
+icd9_cui_4to8icparent <-
+  icd9_parent %>%
+  inner_join(cui_ic, by=c('parent'='cui')) %>%
+  filter(ic>=4, ic<=8) %>%
+  # one icd9 code can have multiple parent cui for it
+  group_by(icd9) %>%  
+  # keep the most specific one, highest IC
+  filter(ic==max(ic)) %>%
+  ungroup() %>%
+  transmute(icd9, cui, parent_cui=parent, ic)
+  
+```
+
+##### 2.8 (3 pts)
+Use the resulting data frame to replace diagnoses in the dx_cohort with their parent CUI that is in the desired IC range. If there is no parent CUI or no parent CUI in the right IC range, leave the diagnosis as it is. How many diagnosis features do you have after aggregation by IC? If something seems off, check how the data is coded in MIMIC relative to how it is coded in the snomed files... 
+
+**Code for converting MIMIC icd9 code to SNOMED icd9 code**
+```{r}
+############ Special Cases: this is to deal with the code spans over a range
+# 327 -> C1561892
+# 5401 -> C0577030
+# numbers starts with 800 - 829 -> C3872870
+# 042 -> C0042769
+
+# this is a helper function to extract the last n character from a string
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+### Convert the icd9 code in table (sub_diagtime_diag_indext) to the format of 
+# icd9 code in table (icd9_cui_4to8icparent)
+replace_special <- sub_diagtime_diag_indext
+for (i in 1:nrow(replace_special)){
+  if (replace_special[i, 'diagnosis'] == "042"){
+    replace_special[i, 'diagnosis'] = "C0042769"
+  }else if (replace_special[i, 'diagnosis'] == "5401"){
+    replace_special[i, 'diagnosis'] = "C0577030"
+  }else if (replace_special[i, 'diagnosis']=="327"){
+    replace_special[i, 'diagnosis'] = "C1561892"
+  }else if (substr(replace_special[i, 'diagnosis'], 1, 1) == '8'){
+    first_three = as.numeric(substr(replace_special[i, 'diagnosis'], 1, 3))
+    if (first_three >= 800 & first_three <= 829){
+      replace_special[i, 'diagnosis'] = "C3872870"
+    }
+  }else if (substr(replace_special[i, 'diagnosis'], 1, 1) == 'E'){
+    if (nchar(replace_special[i, 'diagnosis']) == 4){
+      replace_special[i, 'diagnosis'] = replace_special[i, 'diagnosis']
+    }else if (substrRight(replace_special[i, 'diagnosis'], 1)=="0"){
+      replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 
+                                               1, 4)
+    }else{ # add a point between third and fourth digits
+      replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 
+                  1, 4), ".", substr(replace_special[i, 'diagnosis'], 5, 5), sep = "")
+    }
+  }else{ 
+    if (nchar(replace_special[i, 'diagnosis']) > 3){
+      n = nchar(replace_special[i, 'diagnosis'])
+      if (n == 5 & substr(replace_special[i, 'diagnosis'], 4, n) == '00'){
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 
+                                                 1, 3)
+      }else if(n == 5 & substr(replace_special[i, 'diagnosis'], 5, n) == '0'){
+        replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 
+                    1, 3), ".", substr(replace_special[i, 'diagnosis'], 4, 4), sep = "")
+      }else if (n == 4 & substr(replace_special[i, 'diagnosis'], 4, n) == '0'){
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 
+                                                 1, 3)
+      }else{
+        replace_special[i, 'diagnosis'] = paste(substr(replace_special[i, 'diagnosis'], 
+                    1, 3), ".", substr(replace_special[i, 'diagnosis'], 4, n), sep = "")
+      }
+      if (substr(replace_special[i, 'diagnosis'], 1, 2) == '00'){
+        n = n = nchar(replace_special[i, 'diagnosis'])
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 3, n)
+      }else if(substr(replace_special[i, 'diagnosis'], 1, 1) == '0'){
+        n = nchar(replace_special[i, 'diagnosis'])
+        replace_special[i, 'diagnosis'] = substr(replace_special[i, 'diagnosis'], 2, n)
+      }
+    }
+  }
+}
+```
+
+replace_special is the table sub_diagtime_diag_indext with diagnosis code coverted to the same version as in table icd9_cui_4to8icparent.
+```{r}
+# left join two tables, keep the icd9 code in replace_special if not occurs in
+# icd9_cui_4to8icparent
+icd9_to_cui <-
+  replace_special %>%
+  left_join(icd9_cui_4to8icparent, by=c('diagnosis'='icd9'))
+
+# replace diagnosis with parent_cui if parent_cui is present
+for (i in 1:nrow(icd9_to_cui)){
+  if (!is.na(icd9_to_cui[i, 'parent_cui'])){
+    icd9_to_cui[i,'diagnosis'] <- icd9_to_cui[i,'parent_cui']
+  }
+}
+diag_table_with_general_cui <-
+  icd9_to_cui %>%
+  select(subject_id, diagnosis_time, diagnosis, index_time)
+
+length(unique(diag_table_with_general_cui$diagnosis))
+
+```
+**MY ANWSER:**  
+I have 587 diagnosis features after aggregation by IC.
+
+##### 2.9 (10 pts)
+Now we have our list of diagnoses features and the times they occured for each patient. All that is left to do is to create the patient-feature matrix. Using `tidyr` and `dplyr`, make a patient-feature matrix where each row is a single patient and each column is a diagnosis code, time binned by whether or not it occured in the 6 months most recent to the index time. There should be two columns for every diagnosis- one that indicates how many times the patient had the code in her record in the past six months, and one that indicates how many times that patient had the code in her record before that time. The way to implement this is using a `mutate` to create a time bin indicator and then grouping on that before summarizing and spreading. Use `unite` before spreading to create a unique name for each feature based on its diagnosis code and time bin.
+
+Note that the ICU stay is the first time many patients have been seen at this hospital, so most patients may have few or no prior recorded diagnoses.
+```{r}
+# assume there are 180 days in 6 months
+# create a dataframe with a variable relative_time indicating if the diagnosis time is 
+# within 6 months (in6m) before index time or even older (before6m)
+with_time_indicator <-
+  diag_table_with_general_cui %>%
+  mutate(difference=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(diagnosis_time), 
+                                        units='days'))) %>%
+  mutate(relative_time = ifelse(difference > 180, "before6m", "in6m")) %>%
+  select(subject_id, diagnosis, relative_time)
+  
+diagnosis_matrix <- 
+  with_time_indicator %>%
+  unite(diagnosis_relativetime, diagnosis, relative_time) %>%
+  group_by(subject_id, diagnosis_relativetime) %>%
+  mutate(n=n()) %>%
+  ungroup() %>%
+  distinct() %>% 
+  spread(key=diagnosis_relativetime, value=n)
+# replace NA in the matrix with 0
+diagnosis_matrix[is.na(diagnosis_matrix)] <- 0
+
+dim(diagnosis_matrix)
+
+```
+What are the dimensions of your resultant dataframe?  
+
+**MY ANWSER:**  
+The dimensions of my resultant dataframe is 176 rows and 807 columns.
+
+### Notes
+
+##### 2.10 (7 pts)
+Now let's add features from notes. To do so, we'll have to process some text.
+
+The `noteevents` table in MIMIC is too large and unweildy to load into R, so we've extracted the rows from that table that you will need by loading the cohort table into the database and using SQL. Write the SQL that you would use to get every row of the notes table that is for a patient in the cohort and that was written before the index date.  
+**MY ANWSER:**  
+```sql
+SELECT subject_id, index_time
+FROM cohort
+INNER JOIN NOTEEVENTS
+ON cohort.subject_id= NOTEEVENTS.SUBJECT_ID
+WHERE NOTEEVENTS.CHARTDATE < cohort.index_time;
+```
+
+##### 2.11 (3 pts)
+The result is in the file `notes.csv`. Load it into R and examine it with `head()`.
+```{r}
+notes <- read.csv("../hw2/data/notes.csv", as.is = TRUE)
+
+```
+
+
+UMLS terminologies provide concept hierarchies, as well as sets of terms for individual concepts. For example, there are more than 50 terms in UMLS terminologies for the concept 'myocardial infarction'!
+
+In this step, you will use the SNOMED CT hierarchy and UMLS term sets to construct a dictionary of terms for respiratory system disorders, and then search for those terms in MIMIC III notes.
+
+First, load `snomed_ct_isaclosure.csv` and `snomed_ct_str_cui.csv` in R, and examine them with `head()`. `snomed_ct_isaclosure.csv` contains the child-parent CUI relationships for all of SNOMED CT. `snomed_ct_str_cui.csv` contains the terms (each with a unique term identifier, tid) for each SNOMED CT CUI. These are large files, so loading them may take a minute.
+```{r}
+snomed_ct_isaclosure <- read.csv("../hw2/data/snomed_ct_isaclosure.csv", as.is = TRUE)
+snomed_ct_str_cui<- read.csv("../hw2/data/snomed_ct_str_cui.csv", as.is = TRUE)
+```
+
+Join `snomedct_isa_closure` with `snomedct_cui_string` to find all terms for each CUI (including the terms associated with its children).
+
+```{r}
+cui_str <-
+  snomed_ct_isaclosure %>%
+  select(descendant, ancestor) %>%
+  inner_join(snomed_ct_str_cui, by=c('descendant'='CUI')) %>%
+  select(ancestor, str) %>%
+  rename(cui=ancestor) %>%
+  distinct()
+```
+##### 2.12 (4 pts)
+
+Find the CUI for respiratory system disorders in SNOMED CT, and construct a dictionary of all terms (a set of terms) corresponding to  respiratory disorders that have 20 characters or fewer. How many terms are in the dictionary?
+
+The CUI for respiratory system disorders in SNOMED CT is 'C0035204'.
+```{r}
+RSD <- 
+  cui_str %>%
+  filter(cui=='C0035204') %>%
+  filter(nchar(str)<=20)
+dict <- RSD$str
+length(dict)
+```
+**MY ANWSER:**  
+There are 1193 terms in the dictionary. 
+
+##### 2.13 (7 pts)
+With the dictionary in hand, use `str_detect` from `stringr` and `sapply` from base R to add columns to your notes dataframe indicating whether or not text in that note matches one of the first fifty terms in your dictionary (limited for computational purposes). Your answer should have the columns `note_id` (the same as `row_id` in `notes.csv`), `subject_id`, `chartdate`, and as many more columns as there are terms in the dictionary (50).
+```{r}
+first_50 <- dict[1:50]
+notes_cols <- 
+  notes %>%
+  select(row_id, subject_id, chartdate, text)
+add_column <- function(term){
+  str_detect(notes_cols$text, term)
+}
+notes_50_terms <- 
+  cbind(notes_cols, sapply(first_50,add_column)) %>%
+  select(-text) %>%
+  rename(note_id=row_id)
+# Note: in notes_50_terms, values are TRUE or FALSE to indicate the presence or
+# absence of the term in notes
+dim(notes_50_terms)
+```
+
+
+What are the dimensions of the resulting dataframe?  
+**MY ANWSER:**  
+There are 31944 rows and 53 columns in the resulting dataframe.
+
+##### 2.14 (7 pts)
+
+Now use `snomed_ct_concept_string` to convert terms back to their concepts and construct a dataframe of `subject_id`, `chartdate` and `concept`.
+```{r}
+sub_chartdate_concept <- 
+  notes_50_terms %>%
+  gather(`inhalation injury`:`fryns syndrome`, key=term, value=TorF) %>%
+  filter(TorF==TRUE) %>%
+  inner_join(cui_str, by=c('term'='str')) %>%
+  select(subject_id, chartdate, cui) %>%
+  rename(concept=cui)
+```
+
+
+##### 2.15 (7 pts)
+
+As with the diagnoses, we must transform this data into a patient-feature matrix. Use `dplyr` and `tidyr` to transform this table of concept mentions into a patient-feature matrix where each row is a patient and each column is the presence or absence of a concept. Do not do any time-binning. Each concept should have only one column. Instead of counts, use a binary indicator to indicate that the concept was present in the patient's notes.
+```{r}
+note_matrix <-
+  sub_chartdate_concept %>%
+  select(subject_id, concept) %>%
+  distinct() %>% # so the count will be 1 or 0, binary
+  group_by(subject_id, concept) %>%
+  mutate(n=n()) %>%
+  spread(key=concept, value=n)
+note_matrix[is.na(note_matrix)] <- 0
+dim(note_matrix)
+```
+
+
+What are the dimensions of the resulting table?  
+**MY ANWSER:**  
+There are 80 rows and 61 columns in the resulting dataframe.
+
+### Vitals
+
+##### 2.16 (4 pts)
+
+Finally, let's try to engineer some features from vital sign measurements.
+
+We will focus on heart rate measurements. In what table would you find heart rate measurements in MIMIC? Use the online documentation.  
+**MY ANWSER:**  
+In CHARTEVENTS table, I can find heart rate measurements by querying ITEMID equals to 212.
+
+
+##### 2.17 (5 pts)
+
+As with the notes, we've done the work of extracting the patients' heart rates for you and filtering them for those that are before the index time. Load the table `heart_rates.csv` to proceed.
+```{r}
+heart_rates <- read.csv("../hw2/data/heart_rates.csv", as.is = TRUE)
+
+```
+
+Let's do a sanity check. Make sure none of the measurements in this file were actually recorded after the index time or each patient. How many incorrect rows are there? If there are any, filter them out.
+```{r}
+# inner_join heart_rates table with cohort table
+# check if all records are good (meaning chartime < index time). 
+incorrect_rows <-
+  cohort %>%
+  inner_join(heart_rates, by=c('icustay_id', 'subject_id')) %>%
+  filter(charttime > index_time)
+nrow(incorrect_rows)
+```
+There is one incorrect row. Filter it out:
+```{r}
+corrected_heart_rates <-
+  cohort %>%
+  inner_join(heart_rates, by=c('icustay_id', 'subject_id')) %>%
+  filter(charttime < index_time)
+
+```
+
+
+##### 2.18 (10 pts)
+
+One feature of interest might be the latest value of the heart rate before the index time. Use `dplyr` to make a dataframe with three columns: `subject_id`, `latest_heart_rate`, and `charttime`. 
+
+```{r}
+latest_heart_rate_table <-
+  corrected_heart_rates %>%
+  group_by(subject_id) %>%
+  filter(min_rank(desc(charttime))<=1) %>%
+  select(subject_id, valuenum, charttime) %>%
+  rename(latest_heart_rate=valuenum)
+  
+```
+
+What is the average value of the latest recorded heart rate in this cohort? Make a histogram or density plot to convince yourself that the data are consistent with what you might expect heart rate measurements to be in this cohort. *(10 pts)*
+```{r}
+mean(latest_heart_rate_table$latest_heart_rate)
+```
+The average value of the latest recorded heart rate in this cohort is 89.28172.
+```{r}
+qplot(latest_heart_rate_table$latest_heart_rate, 
+      geom="histogram",
+      binwidth = 1,
+      xlab='latest recorded heart rate (BPM)'
+      )
+```
+
+
+##### 2.19 (5 pts)
+
+The latest recorded heart rate might not be a useful feature to use if the latest recording is not near the index time. Make a density plot of the time difference between the latest heart rate recording and the index time.
+```{r}
+time_diff <-
+  corrected_heart_rates %>%
+  group_by(subject_id) %>%
+  filter(min_rank(desc(charttime))<=1) %>%
+  mutate(difference=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(charttime), 
+                                        units='mins')))
+ggplot(data=time_diff, aes(difference)) +
+  geom_density() +
+  labs(x='time difference (min)')
+```
+
+
+##### 2.20 (7 pts)
+Some patients might have many heart rate recordings, and only using the last one might not be the best idea- it's possible the latest measurement is an outlier. Let's try to leverage all the heart rate measurements we have by creating a time-weighted average heart rate. Use the formula $w = e^{(-|\Delta t| - 1)}$ to calculate the weights of each measurement, where $\Delta t$ is the time difference between the measurement time and the index time in hours. Calculate the weighted average with the formula $\bar{x}_w = \sum(x_i w_i)/\sum(w_i)$. The result should be a dataframe with two columns: `subject_id` and `time_wt_avg`. Beware of measurements that were noted but have no recorded value.
+```{r}
+weighted_HR <-
+  corrected_heart_rates[complete.cases(corrected_heart_rates),] %>%
+  mutate(diff=as.numeric(difftime(as.POSIXct(index_time), as.POSIXct(charttime), 
+                                  units='hours'))) %>%
+  mutate(w=exp(-diff-1)) %>%
+  mutate(xw=valuenum*w) %>%
+  select(subject_id, xw, w) %>%
+  group_by(subject_id) %>%
+  summarise_each(funs(sum)) %>%
+  mutate(time_wt_avg=xw/w) %>%
+  select(subject_id, time_wt_avg)
+
+mean(weighted_HR$time_wt_avg)
+```
+
+What is the average time-weighted average heart rate across all patients?  
+**MY ANWSER:**  
+The average time-weighted average heart rate across all patients is 88.86548.
+
+##### 2.21 (4 pts)
+Again let's do a sanity check to see if what we've done makes sense. We should expect that the time-weighted average heart rate and the latest recorded heart rate should be similar.
+
+Make a scatterplot of the latest recorded heart rate (x-axis) and the time-weighted average heart rate (y-axis) of each patient.
+```{r}
+latest_avg <-
+  latest_heart_rate_table %>%
+  select(subject_id, latest_heart_rate) %>%
+  inner_join(weighted_HR, by='subject_id')
+ggplot(data=latest_avg) +
+  geom_point(mapping=aes(x=latest_heart_rate, y=time_wt_avg)) +
+  labs(x='latest recored heart rate (BPM)', y='time-weighted average heart rate (BPM)')
+
+```
+
+
+### Joining the Features
+
+##### 2.22 (15 pts)
+Our final patient-feature matrix will simply be the amalgamation of the different feature matrices we've created. Use an outer join to combine the columns of the feature matrices from diagnoses, notes, and heart rate measurements. Not all patients have diagnoses or note features, so fill in any NA values with 0 to indicate that there were no diagnoses or notes counted. Use `names` to look at all the features and make sure everything seems ok.
+```{r}
+patient_feature_matrix <-
+  diagnosis_matrix %>%
+  full_join(note_matrix) %>%
+  full_join(weighted_HR) 
+patient_feature_matrix[is.na(patient_feature_matrix)] <- 0
+names(patient_feature_matrix)
+```
+
+
+How many total features are there? What is the correlation between the number of unspecified hypertension diagnoses in the past six months and the latest measured heart rate? *(15 pts)*
+
+```{r}
+ncol(patient_feature_matrix)
+```
+There are 867 features for each patient (not including subject_id).
+
+After searching the internet, I decided icd9 code equals to 401.9 is an indication of unspecified hypertension diagnosis. Therefore, from patient_feature_matrix, extract the columns '401.9_in6m' and time_wt_avg for analysis. 
+```{r}
+UHD <-
+  patient_feature_matrix %>%
+  select(subject_id, `401.9_in6m`,time_wt_avg) 
+ggplot(data=UHD) +
+  geom_point(mapping=aes(x=`401.9_in6m`, y=time_wt_avg))
+
+```
+An inspection of scatter plot shows that there are three possible numbers for unspecified hypertension diagnosis, 0, 1 and 2. There are a lot more patients have 0 dianosis and only 2 patients have 2 diagnoses. Next, plot the average and standard deviation of heart rate for each group.
+```{r}
+UHD$`401.9_in6m` <- as.factor(UHD$`401.9_in6m`)
+UHD_summary <-
+  UHD %>%
+  group_by(`401.9_in6m`) %>%
+  summarise(avg=mean(time_wt_avg), sd=sd(time_wt_avg))
+UHD_summary$`401.9_in6m` <- as.factor(UHD_summary$`401.9_in6m`)
+ggplot(data=UHD_summary) +
+  geom_bar(mapping=aes(x=`401.9_in6m`, y=avg, fill=`401.9_in6m`),stat='identity') +
+  geom_errorbar(aes(x=`401.9_in6m`,y=avg,ymax=avg+sd,ymin=avg-sd), size=1, width=0.5) +
+  labs(x='number of unspecific hypertension in the past six months',
+       y='time weighted average heart rate (BPM)')
+```
+
+This bar graph indicates that patients having 2 unspecified hypertension diagnoses have higher average heart rate than those having only 1 diagnosis or no diagnosis. However, we should keep in mind that there are only two data point for '2 diagnoses' group. Therefore, the significance of this correlation needs to be validated by collecting more data and doing a proper statistic analysis.
+
+
+
+### Done!
+
+That's it! We've gone through the major steps of transforming different kinds of data stored in a longitudinal database into a patient-feature matrix that we can use for association tests and prediction tasks. Along the way we hope you have gained practice in how to effectively use the `dplyr` and `tidyr` packages to manipulate data and the `ggplot2` package to make visual diagnostics. You are well on your way to being able to perform a clinical informatics study.
