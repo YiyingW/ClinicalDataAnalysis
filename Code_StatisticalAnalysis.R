@@ -42,11 +42,204 @@ qplot(new_feature_matrix$chartindicator_1622, geom="histogram", binwidth=1) # ra
 qplot(new_feature_matrix$chartindicator_31, geom="histogram", binwidth=1) # rank-sum
 # use Mann-Whitney-Wilcoxon Test, we can decide whether the population distributions are identical without
 # assuming them to follow the normal distribution
-qplot(new_feature_matrix$chartvalue_618, geom="histogram", binwidth=1)  # t-test, normality of data distribution
-qplot(new_feature_matrix$chartvalue_778, geom="histogram", binwidth=1)  # t-test, normality of data distribution
+
+# even when the assumption of normality holds, the Mann-Whitney test is nearly as powerful as the t-test.
+qplot(new_feature_matrix$chartvalue_618, geom="histogram", binwidth=1)  # t-test, normality of data distribution, or rank sum
+qplot(new_feature_matrix$chartvalue_778, geom="histogram", binwidth=1)  # t-test, normality of data distribution, or rank sum
 # Fisher's Exact test is a way to test the association between two categorical variables when you have small
 # cell sizes (<5). Chi-square test is used when the cell sizes are expeted to be large.
-qplot(new_feature_matrix$oxy_drop, geom="histogram", binwidth=1)  # Fisher, chi-square
+qplot(new_feature_matrix$oxy_drop, geom="histogram", binwidth=1)  # Fisher
 qplot(new_feature_matrix$C2720507, geom="histogram", binwidth=1)  # Fisher, chi-squre
+
+####### doing tests ############
+# chartindicator_1622 as iv1
+iv1_outcome <- data.frame(new_feature_matrix$chartindicator_1622, outcome)
+colnames(iv1_outcome) <- c("iv1", 'outcome')
+iv1_dead <-
+  iv1_outcome %>%
+  filter(outcome=='died') 
+iv1_dead_vector <-as.vector(iv1_dead$iv1)
+
+iv1_not_dead <-
+  iv1_outcome %>%
+  filter(outcome=='survived') 
+iv1_not_dead_vector <-as.vector(iv1_not_dead$iv1)
+
+wilcox.test(iv1_dead_vector, iv1_not_dead_vector, correct = F)
+
+#	Wilcoxon rank sum test
+#data:  iv1_dead_vector and iv1_not_dead_vector
+#W = 849870, p-value = 0.07161
+#alternative hypothesis: true location shift is not equal to 0
+
+# chartindicator_31 as iv2
+iv2_outcome <- data.frame(new_feature_matrix$chartindicator_31, outcome)
+colnames(iv2_outcome) <- c("iv2", 'outcome')
+iv2_dead <-
+  iv2_outcome %>%
+  filter(outcome=='died') 
+iv2_dead_vector <-as.vector(iv2_dead$iv2)
+
+iv2_not_dead <-
+  iv2_outcome %>%
+  filter(outcome=='survived') 
+iv2_not_dead_vector <-as.vector(iv2_not_dead$iv2)
+
+wilcox.test(iv2_dead_vector, iv2_not_dead_vector, correct = F)
+
+#	Wilcoxon rank sum test
+# data:  iv2_dead_vector and iv2_not_dead_vector
+# W = 860330, p-value = 0.1854
+# alternative hypothesis: true location shift is not equal to 0
+
+
+# chartvalue_618 as iv3
+iv3_outcome <- data.frame(new_feature_matrix$chartvalue_618, outcome)
+colnames(iv3_outcome) <- c("iv3", 'outcome')
+iv3_dead <-
+  iv3_outcome %>%
+  filter(outcome=='died') 
+iv3_dead_vector <-as.vector(iv3_dead$iv3)
+
+iv3_not_dead <-
+  iv3_outcome %>%
+  filter(outcome=='survived') 
+iv3_not_dead_vector <-as.vector(iv3_not_dead$iv3)
+
+wilcox.test(iv3_dead_vector, iv3_not_dead_vector, correct = F)
+
+#	Wilcoxon rank sum test
+# data:  iv3_dead_vector and iv3_not_dead_vector
+# W = 1056300, p-value = 1.669e-13
+# alternative hypothesis: true location shift is not equal to 0
+
+t.test(iv3_dead_vector, iv3_not_dead_vector, var.equal = T)
+
+# Two Sample t-test
+
+# data:  iv3_dead_vector and iv3_not_dead_vector
+# t = 6.6282, df = 3453, p-value = 3.926e-11
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#   1.169279 2.151604
+# sample estimates:
+#   mean of x mean of y 
+# 18.37304  16.71260 
+
+t.test(iv3_dead_vector, iv3_not_dead_vector, var.equal = F)
+
+# Welch Two Sample t-test
+
+# data:  iv3_dead_vector and iv3_not_dead_vector
+# t = 6.6899, df = 939.96, p-value = 3.83e-11
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#   1.173349 2.147533
+# sample estimates:
+#   mean of x mean of y 
+# 18.37304  16.71260 
+
+
+# chartvalue_778 as iv4
+iv4_outcome <- data.frame(new_feature_matrix$chartvalue_778, outcome)
+colnames(iv4_outcome) <- c("iv4", 'outcome')
+iv4_dead <-
+  iv4_outcome %>%
+  filter(outcome=='died') 
+iv4_dead_vector <-as.vector(iv4_dead$iv4)
+
+iv4_not_dead <-
+  iv4_outcome %>%
+  filter(outcome=='survived') 
+iv4_not_dead_vector <-as.vector(iv4_not_dead$iv4)
+
+wilcox.test(iv4_dead_vector, iv4_not_dead_vector, correct = F)
+
+#	Wilcoxon rank sum test
+# data:  iv4_dead_vector and iv4_not_dead_vector
+# W = 648010, p-value < 2.2e-16
+# alternative hypothesis: true location shift is not equal to 0
+
+t.test(iv4_dead_vector, iv4_not_dead_vector, var.equal = T)
+
+# Two Sample t-test
+
+# data:  iv4_dead_vector and iv4_not_dead_vector
+# t = -9.1609, df = 3453, p-value < 2.2e-16
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#   -3.604566 -2.333650
+# sample estimates:
+#   mean of x mean of y 
+# 35.99930  38.96841 
+
+t.test(iv4_dead_vector, iv4_not_dead_vector, var.equal = F)
+
+# Welch Two Sample t-test
+
+# data:  iv4_dead_vector and iv4_not_dead_vector
+# t = -8.0785, df = 827.23, p-value = 2.314e-15
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#   -3.690516 -2.247700
+# sample estimates:
+#   mean of x mean of y 
+# 35.99930  38.96841 
+
+
+qplot(new_feature_matrix$C2720507, geom="histogram", binwidth=1)  # Fisher, chi-squre
+
+# oxy_drop as iv5 
+outcome_num <- as.numeric(as.factor(outcome))
+iv5_outcome <- data.frame(new_feature_matrix$oxy_drop, outcome_num)
+colnames(iv5_outcome) <- c("iv5", 'outcome')
+
+chisq.test(x=iv5_outcome$iv5, iv5_outcome$outcome)
+
+# Pearson's Chi-squared test with Yates' continuity correction
+
+# data:  iv5_outcome$iv5 and iv5_outcome$outcome
+# X-squared = 36.034, df = 1, p-value = 1.939e-09
+fisher.test(x=iv5_outcome$iv5, iv5_outcome$outcome)
+# Fisher's Exact Test for Count Data
+
+# data:  iv5_outcome$iv5 and iv5_outcome$outcome
+# p-value = 3.571e-09
+# alternative hypothesis: true odds ratio is not equal to 1
+# 95 percent confidence interval:
+# 0.4763356 0.6907991
+# sample estimates:
+# odds ratio 
+# 0.5732915 
+
+
+
+# C2720507 as iv6 
+outcome_num <- as.numeric(as.factor(outcome))
+iv6_outcome <- data.frame(new_feature_matrix$C2720507, outcome_num)
+colnames(iv6_outcome) <- c("iv6", 'outcome')
+
+chisq.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
+
+# Pearson's Chi-squared test with Yates' continuity correction
+
+# data:  iv6_outcome$iv6 and iv6_outcome$outcome
+
+fisher.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
+# Fisher's Exact Test for Count Data
+
+# data:  iv6_outcome$iv6 and iv6_outcome$outcome
+# p-value = 0.8422
+# alternative hypothesis: true odds ratio is not equal to 1
+# 95 percent confidence interval:
+# 0.6120581 1.4127256
+# sample estimates:
+# odds ratio 
+# 0.9428064 
+
+
+
+
+
 
 
