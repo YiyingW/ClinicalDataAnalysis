@@ -115,6 +115,7 @@ wilcox.test(iv3_dead_vector, iv3_not_dead_vector, correct = F)
 
 t.test(iv3_dead_vector, iv3_not_dead_vector, var.equal = T)
 
+
 # Two Sample t-test
 
 # data:  iv3_dead_vector and iv3_not_dead_vector
@@ -237,8 +238,36 @@ fisher.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
 # odds ratio 
 # 0.9428064 
 
+# 2.1.3
+# how many chart varible features?
+chart_variables <-
+  new_feature_matrix %>%
+  select(starts_with('chartvalue')) 
 
+dim(chart_variables)
+adjusted_p <- 0.05/ncol(chart_variables)
 
+# use for loop to iterate over chartvalue varibles. Perform t-test on each,
+# compare the p-value with corrected p value and with 0.05. Count the number
+bonferroni_corrected_count <- 0
+standard_count <- 0
+for (i in 1:ncol(chart_variables)){
+  iv_outcome <- data.frame(chart_variables[,i], outcome)
+  colnames(iv_outcome) <- c("iv", 'outcome')
+  iv_dead <-
+    iv_outcome %>%
+    filter(outcome=='died') 
+  iv_dead_vector <-as.vector(iv_dead$iv)
+  
+  iv_not_dead <-
+    iv_outcome %>%
+    filter(outcome=='survived') 
+  iv_not_dead_vector <-as.vector(iv_not_dead$iv)
+  test <- t.test(iv_dead_vector, iv_not_dead_vector, var.equal = T)
+  p <- test$p.value
+  if (p<= 0.05) {standard_count <-standard_count+1 }
+  if (p<=adjusted_p) {bonferroni_corrected_count <-bonferroni_corrected_count+1 }
+}
 
 
 
