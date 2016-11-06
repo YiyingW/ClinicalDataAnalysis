@@ -265,8 +265,8 @@ for (i in 1:ncol(chart_variables)){
   iv_not_dead_vector <-as.vector(iv_not_dead$iv)
   test <- t.test(iv_dead_vector, iv_not_dead_vector, var.equal = T)
   p <- test$p.value
-  if (p<= 0.05) {standard_count <-standard_count+1 }
-  if (p<=adjusted_p) {bonferroni_corrected_count <-bonferroni_corrected_count+1 }
+  if (p<= 0.05) {standard_count <-standard_count+1}
+  if (p<=adjusted_p) {bonferroni_corrected_count <-bonferroni_corrected_count+1}
 }
 
 
