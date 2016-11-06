@@ -216,8 +216,8 @@ fisher.test(x=iv5_outcome$iv5, iv5_outcome$outcome)
 
 
 # C2720507 as iv6 
-outcome_num <- as.numeric(as.factor(outcome))
-iv6_outcome <- data.frame(new_feature_matrix$C2720507, outcome_num)
+outcome_code <- ifelse(outcome=="died", 1, 0)
+iv6_outcome <- data.frame(new_feature_matrix$C2720507, outcome_code)
 colnames(iv6_outcome) <- c("iv6", 'outcome')
 
 chisq.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
@@ -225,6 +225,7 @@ chisq.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
 # Pearson's Chi-squared test with Yates' continuity correction
 
 # data:  iv6_outcome$iv6 and iv6_outcome$outcome
+# X-squared = 0.036408, df = 1, p-value = 0.8487
 
 fisher.test(x=iv6_outcome$iv6, iv6_outcome$outcome)
 # Fisher's Exact Test for Count Data
@@ -251,23 +252,107 @@ adjusted_p <- 0.05/ncol(chart_variables)
 # compare the p-value with corrected p value and with 0.05. Count the number
 bonferroni_corrected_count <- 0
 standard_count <- 0
+include_chartvalue <- c()
 for (i in 1:ncol(chart_variables)){
-  iv_outcome <- data.frame(chart_variables[,i], outcome)
+  iv_outcome <- data.frame(chart_variables[,i], outcome_code)
   colnames(iv_outcome) <- c("iv", 'outcome')
   iv_dead <-
     iv_outcome %>%
-    filter(outcome=='died') 
+    filter(outcome==1) 
   iv_dead_vector <-as.vector(iv_dead$iv)
   
   iv_not_dead <-
     iv_outcome %>%
-    filter(outcome=='survived') 
+    filter(outcome==0) 
   iv_not_dead_vector <-as.vector(iv_not_dead$iv)
   test <- t.test(iv_dead_vector, iv_not_dead_vector, var.equal = T)
   p <- test$p.value
   if (p<= 0.05) {standard_count <-standard_count+1}
-  if (p<=adjusted_p) {bonferroni_corrected_count <-bonferroni_corrected_count+1}
+  if (p<=adjusted_p) {
+    bonferroni_corrected_count <-bonferroni_corrected_count+1
+    include_chartvalue <- c(include_chartvalue, colnames(chart_variables[i]))
+  }
 }
+
+# 2.2.1 Regression models for association 
+# Build a feature matrix contain age, gender, oxy_drop and selected chartvalue variables
+feature_matrix_for_RegModel <-
+  new_feature_matrix %>%
+  select(age_in_days, gender, oxy_drop, one_of(include_chartvalue))
+
+model1 <- glm(outcome_code ~ age_in_days + oxy_drop, family = "binomial", data=feature_matrix_for_RegModel)
+model2 <- glm(outcome_code ~ age_in_days + gender + oxy_drop, family = "binomial", data=feature_matrix_for_RegModel)
+model3 <- glm(outcome_code ~ ., family = "binomial", data=feature_matrix_for_RegModel)
+
+# 2.2.2
+confint.default(model1,parm='oxy_drop', level=0.95)
+confint.default(model2,parm='oxy_drop', level=0.95)
+confint.default(model3,parm='oxy_drop', level=0.95)
+
+# 2.2.3
+# model3 CI range > model2 CI range > model1 CI range
+
+# 2.2.4
+# pass
+
+# 2.3.1
+cohort <- read.csv("../hw3/data/cohort.csv", as.is = TRUE)
+patients_survival <-
+  cohort %>%
+  select(index_time, censor_time, oxy_drop, death_in_stay) %>%
+  mutate(survival_time=ceiling(as.numeric(difftime(as.POSIXct(censor_time), as.POSIXct(index_time), units='days')))) %>%
+  mutate(censor=ifelse(death_in_stay=='died', 0, 1)) %>%
+  mutate(event=ifelse(death_in_stay=='died', 1, 0)) %>%
+  select(survival_time, oxy_drop, censor, event)
+
+# 2.3.2 Kaplan-Meier Curves
+toy_data <- 
+  data.frame(week=c(9,9,13,13,18,23,28,31,34,45,48,161), censor=c(0,0,0,1,0,0,1,0,0,1,0,1), 
+             event=c(1,1,1,0,1,1,0,1,1,0,1,0))
+longest_time <-
+  max(toy_data$week)
+  
+time_intervals <-
+  toy_data %>%
+  filter(censor==0) %>%
+  arrange(week) %>%
+  select(week) %>%
+  unique()
+n_total <- nrow(toy_data)
+KM_table <-
+  toy_data %>%
+  arrange(week) %>%
+  mutate(new_week=ifelse(censor==1, week+0.1, week)) %>%
+  mutate(cum_d=cumsum(event)) %>%
+  mutate(cum_c=cumsum(censor)) %>%
+  select(new_week, cum_d, cum_c) %>%
+  group_by(new_week) %>%
+  top_n(n=1, wt=cum_d) %>%
+  ungroup() %>%
+  rbind(c(0, 0, 0),.) %>%
+  mutate(dj=cum_d-lag(cum_d)) %>%
+  mutate(cj=lead(cum_c)-cum_c) %>%
+  right_join(., time_intervals, by=c('new_week'='week')) %>%
+  mutate(loss=dj+cj) %>%
+  mutate(acum_loss=cumsum(loss)) %>%
+  rbind(c(0,0,0,0,0,0,0),.) %>%
+  mutate(nj=n_total-lag(acum_loss)) %>%
+  mutate(pi=(nj-dj)/nj) %>%
+  right_join(., time_intervals, by=c('new_week'='week')) %>%
+  mutate(st=cumprod(pi)) %>%
+  select(new_week, st) %>%
+  rbind(c(0,1),.) 
+lowest_prob <- min(KM_table$st)
+KM_table2 <-
+  KM_table %>%
+  mutate(st2=lag(st)) %>%
+  select(new_week, st2) %>%
+  rename(st=st2) %>%
+  rbind(.,KM_table) %>%
+  rbind(., c(longest_time, lowest_prob)) %>%
+  drop_na()
+ggplot(KM_table2, aes(x=new_week, y=st)) +
+  geom_line()
 
 
 
