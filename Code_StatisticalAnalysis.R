@@ -306,6 +306,8 @@ patients_survival <-
   select(survival_time, oxy_drop, censor, event)
 
 # 2.3.2 Kaplan-Meier Curves
+
+
 toy_data <- 
   data.frame(week=c(9,9,13,13,18,23,28,31,34,45,48,161), censor=c(0,0,0,1,0,0,1,0,0,1,0,1), 
              event=c(1,1,1,0,1,1,0,1,1,0,1,0))
@@ -353,6 +355,30 @@ KM_table2 <-
   drop_na()
 ggplot(KM_table2, aes(x=new_week, y=st)) +
   geom_line()
+
+# 3
+# 3.1 Creating training and test sets
+
+# randomly split the data into training and test sets
+library(caret)
+
+set.seed(1)
+outcome_code <- as.factor(outcome_code)
+PredictiveMatrix <- cbind(new_feature_matrix, outcome_code)
+trainIndex <- createDataPartition(PredictiveMatrix$outcome_code, p=0.8, list=FALSE)
+trainingSet <- PredictiveMatrix[trainIndex, ]
+testSet <- PredictiveMatrix[-trainIndex, ]
+
+
+
+
+
+
+
+
+
+
+
 
 
 
