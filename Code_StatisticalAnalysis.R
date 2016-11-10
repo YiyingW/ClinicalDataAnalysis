@@ -370,9 +370,22 @@ trainingSet <- PredictiveMatrix[trainIndex, ]
 testSet <- PredictiveMatrix[-trainIndex, ]
 
 
+# 3.2.1 Fit an elastic net model use lambda = 0.01 and alpha = 1 (LASSO)
 
+net.grid <- expand.grid(.alpha=1,.lambda=0.01)
+ElasticNet.train <- train( outcome_code~., data=trainingSet,
+                          method="glmnet",
+                          tuneGrid=net.grid)
 
-
+# Accuracy   Kappa    
+# 0.8301081  0.2351053
+# 3.2.2 Performance Metrics
+training_features <-
+  trainingSet %>%
+  select(-outcome_code)
+predicted_outcome <- predict(ElasticNet.train, training_features, type='raw')
+confusionMatrix(data=predicted_outcome, reference=trainingSet$outcome_code,
+                positive = levels(trainingSet$outcome_code)[2])
 
 
 
