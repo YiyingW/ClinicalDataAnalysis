@@ -387,12 +387,43 @@ predicted_outcome <- predict(ElasticNet.train, training_features, type='raw')
 confusionMatrix(data=predicted_outcome, reference=trainingSet$outcome_code,
                 positive = levels(trainingSet$outcome_code)[2])
 
+# 3.2.3 ROC and PR curves
+predicted_prob <- predict(ElasticNet.train, training_features, type='prob')
+predicted_prob_real <- cbind(predicted_prob, real=trainingSet$outcome_code)
 
+# iterate over possible threshold p
+TPR <- c()
+FPR <- c()
+precision <- c()
 
+for (p in seq(0, 1, by=0.01)){
+  prob_real_predict <-
+    predicted_prob_real %>%
+    mutate(predict=ifelse(`1`>=p, 1, 0))
+  
+  tp <- nrow(filter(prob_real_predict, predict==1, real==1)) # true positive
+  fp <- nrow(filter(prob_real_predict, predict==1, real==0)) # false positive
+  fn <- nrow(filter(prob_real_predict, predict==0, real==1)) # false negative
+  tn <- nrow(filter(prob_real_predict, predict==0, real==0)) # true negative
+  # for ROC curve
+  thisTPR <- tp/(tp+fn)
+  thisFPR <- fp/(fp+tn)
+  TPR <- c(TPR, thisTPR)
+  FPR <- c(FPR, thisFPR)
+  
+  # for PR curve, note: recall is TPR
+  thisPrecision <- tp/(tp+fp)
+  precision <- c(precision, thisPrecision)
 
+}
 
-
-
-
-
+FPR_TPR <-
+  data.frame(FPR=FPR, TPR=TPR)
+ggplot(FPR_TPR) +
+  geom_line(aes(x=FPR, y=TPR)) +
+  geom_abline(linetype=2) 
+recall_precision <-
+  data.frame(recall=TPR, precision=precision)
+ggplot(recall_precision) +
+  geom_line(aes(x=recall, y=precision), na.rm=TRUE) # some precision is NaN
 
