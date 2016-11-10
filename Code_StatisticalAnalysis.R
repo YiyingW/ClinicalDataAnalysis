@@ -387,9 +387,14 @@ predicted_outcome <- predict(ElasticNet.train, training_features, type='raw')
 confusionMatrix(data=predicted_outcome, reference=trainingSet$outcome_code,
                 positive = levels(trainingSet$outcome_code)[2])
 
-# 3.2.3 ROC and PR curves
-predicted_prob <- predict(ElasticNet.train, training_features, type='prob')
-predicted_prob_real <- cbind(predicted_prob, real=trainingSet$outcome_code)
+# 3.2.3 ROC and PR curves on the test set
+
+test_features <-
+  testSet %>%
+  select(-outcome_code)
+
+predicted_prob <- predict(ElasticNet.train, test_features, type='prob')
+predicted_prob_real <- cbind(predicted_prob, real=testSet$outcome_code)
 
 # iterate over possible threshold p
 TPR <- c()
@@ -426,4 +431,32 @@ recall_precision <-
   data.frame(recall=TPR, precision=precision)
 ggplot(recall_precision) +
   geom_line(aes(x=recall, y=precision), na.rm=TRUE) # some precision is NaN
+
+# 3.2.4 Calibration Plot
+expected <- c()
+observed <- c()
+for (p in seq(0, 0.9, by=0.1)){
+  expected <- c(expected, p)
+  current_interval <-
+    predicted_prob_real %>%
+    filter(`1`>=p, `1`<p+0.1)
+  positive_rate <-
+    nrow(filter(current_interval, real==1))/nrow(current_interval)
+  observed <- c(observed, positive_rate)
+}
+
+calibration_plot <-
+  data.frame(observed=observed, expected=expected)
+linearfit <- lm(expected ~ observed, data = calibration_plot)
+r_squared <- signif(summary(linearfit)$adj.r.squared, digits=4)
+
+ggplot(calibration_plot) +
+  geom_point(aes(x=observed, y=expected), na.rm=TRUE)+ # some observed is NaN
+  xlim(0,1)+
+  ylim(0,1)+
+  geom_abline()+
+  geom_smooth(method="lm",aes(x=observed, y=expected), na.rm=TRUE, se=FALSE) +
+  annotate("text", x=0.1, y=0.9, label="R_squared = ", size=4) +
+  annotate("text", x=0.27, y=0.9, label=as.character(r_squared), size=4)
+  
 
