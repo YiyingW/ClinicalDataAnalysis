@@ -458,5 +458,21 @@ ggplot(calibration_plot) +
   geom_smooth(method="lm",aes(x=observed, y=expected), na.rm=TRUE, se=FALSE) +
   annotate("text", x=0.1, y=0.9, label="R_squared = ", size=4) +
   annotate("text", x=0.27, y=0.9, label=as.character(r_squared), size=4)
-  
+
+# 3.3.1 cross validating the elastic net in caret
+set.seed(1)
+objControl <- trainControl(method='cv', number=4, returnResamp='none', 
+                           summaryFunction = twoClassSummary,classProbs = TRUE)
+searchGrid <- expand.grid(.alpha=c(0.1, 0.5, 0.9),
+                          .lambda=seq(-6.5, -2, by=0.5))
+# run model
+library(pROC)
+levels(trainingSet$outcome_code) <- make.names(levels(factor(trainingSet$outcome_code)))
+objModel <- train(outcome_code~., data=trainingSet,
+                           method="glmnet",
+                           tuneGrid=searchGrid,
+                           trControl=objControl,
+                           metric="ROC")
+
+plot(objModel)
 
