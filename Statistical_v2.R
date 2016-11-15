@@ -225,19 +225,177 @@ model1 <- glm(outcome ~ age_in_days + oxy_drop, family = "binomial", data=regres
 model2 <- glm(outcome ~ age_in_days + gender + oxy_drop, family = "binomial", data=regression_model_features)
 model3 <- glm(outcome ~ ., family = "binomial", data=regression_model_features)
 
+# 2.2.2 Comparing regression models
+# what is the coefficient for oxy_drop in each model and what is its confidence interval?
+summary(model1) # -5.747e-01
+confint(model1) # -7.581675e-01 -3.900444e-01 delta: 0.3681231
+
+summary(model2) # -5.778e-01
+confint(model2) # -7.615069e-01 -3.928747e-01  delta: 0.3686322
+
+summary(model3) # -3.151e-01
+confint(model3) # -5.226494e-01 -1.060480e-01  delta: 0.4166014
+
+# Why does the point estimate change as more features are added? 
+# The point estimate changes as more features are added because the newly added features
+# are correlated with that parameter's corresponding variable and correlated with the response
+# variable as well. 
+
+# Assuming you had a model of Y regressed on X1 and you added the variable X2, under what
+# conditions would the coefficient for X1 not change? 
+# If adding X2 doesn't change X1 coefficient, then X2 is not correlated with X1 and it is not
+# correlated with Y.
+
+# If both are positively correlated with the outcome and with each other, what would happen 
+# to the coefficient of X1 after adding X2? 
+# The coefficient of X1 after adding X2 will decrease because some of the marginal effect of X1
+# is being taken up by the addition of X2.
+
+# 2.2.3 Legitimancy of Confidence Intervals
+# The more correlated the X variables are with each other, the bigger the standard errors
+# become, and the less likely it is that a coefficient will be statistically significant. This
+# is known as the problem of multicollinearity. The more highly correlated independent variables
+# are, the more difficult it is to determine how much variation in Y each X is responsible for. 
+# For example, if X1 and X2 are highly correlated, it is difficult to determine whether X1 is 
+# responsible for variation in Y, or whether X2 is. As a result, the standard errors for both 
+# variables become very large. When multicollinearity occurs, the estimated standard
+# errors of the coefficients tend to be inflated. 
+
+# 2.2.4 Testing residuals
+anova(model1, model2, model3)
+# compared with model1, model2 explains 0.45 more variance in the outcome variable.
+# compared with model2, model2 explains 447.32 more variance in the outcome variable.
+# model3 explains the most variance in the outcome variable. 
 
 
+# 2.3 Survival Analysis
+# 2.3.1 Creating Survival Data
+cohort <- read.csv("../hw3/data/cohort.csv", as.is = TRUE)
+patients_survival <-
+  cohort %>%
+  select(index_time, censor_time, oxy_drop, death_in_stay) %>%
+  mutate(survival_time=ceiling(as.numeric(difftime(as.POSIXct(censor_time), as.POSIXct(index_time), units='days')))) %>%
+  mutate(censor=ifelse(death_in_stay=='died', 0, 1)) %>%
+  mutate(event=ifelse(death_in_stay=='died', 1, 0)) %>%
+  select(survival_time, oxy_drop, censor, event)
+
+# 2.3.2 Kaplan-Meier Curves
+
+# My code
+createKMtable <- function(rawdata){ # rawdata is a dataframe has four columns: survival_time, oxy_drop, censor, event
+  longest_time <- max(rawdata$survival_time)
+  time_intervals <-
+    rawdata %>%
+    filter(censor==0) %>%
+    arrange(survival_time) %>%
+    select(survival_time) %>%
+    unique()
+  n_total <- nrow(rawdata)
+  KM_table <-
+    rawdata %>%
+    arrange(survival_time) %>%
+    mutate(day=ifelse(censor==1, survival_time+0.1, survival_time)) %>%
+    mutate(cum_d=cumsum(event)) %>%
+    mutate(cum_c=cumsum(censor)) %>%
+    select(day, cum_d, cum_c) %>%
+    group_by(day) %>%
+    top_n(n=1, wt=cum_d) %>%
+    ungroup() %>%
+    rbind(c(0, 0, 0),.) %>%
+    mutate(dj=cum_d-lag(cum_d)) %>%
+    mutate(cj=lead(cum_c)-cum_c) %>%
+    right_join(., time_intervals, by=c('day'='survival_time')) %>%
+    mutate(loss=dj+cj) %>%
+    mutate(acum_loss=cumsum(loss)) %>%
+    rbind(c(0,0,0,0,0,0,0),.) %>%
+    mutate(nj=n_total-lag(acum_loss)) %>%
+    mutate(pi=(nj-dj)/nj) %>%
+    right_join(., time_intervals, by=c('day'='survival_time')) %>%
+    mutate(st=cumprod(pi)) %>%
+    select(day, st) %>%
+    rbind(c(0,1),.) 
+  lowest_prob <- min(KM_table$st)
+  KM_table2 <-
+    KM_table %>%
+    mutate(st2=lag(st)) %>%
+    select(day, st2) %>%
+    rename(st=st2) %>%
+    rbind(.,KM_table) %>%
+    rbind(., c(longest_time, lowest_prob)) %>%
+    drop_na()
+  return (KM_table2)
+}
+
+subset_oxydrop <- 
+  patients_survival %>%
+  filter(oxy_drop=="oxy_drop")
+KM_oxydrop <- createKMtable(subset_oxydrop) 
+KM_oxydrop2 <- 
+  KM_oxydrop %>%
+  cbind(oxy_drop=rep("oxy_drop", nrow(KM_oxydrop)))
 
 
+subset_stable <- 
+  patients_survival %>%
+  filter(oxy_drop=="stable")
+KM_stable <- createKMtable(subset_stable) 
+KM_stable2 <- 
+  KM_stable %>%
+  cbind(oxy_drop=rep("stable", nrow(KM_stable)))
+
+KM_to_plot <-
+  KM_oxydrop2 %>%
+  rbind(KM_stable2)
 
 
+ggplot(KM_to_plot, aes(x=day, y=st, color=oxy_drop)) +
+  geom_line() +
+  labs(x="survival time (day)", y='proportion surviving')
+
+# use packages
+library(survival)
+surv_curve <- survfit(Surv(survival_time, event)~strata(oxy_drop), 
+                      patients_survival)
+plot(surv_curve, lty=c(1,3), xlab="survival time (day)",
+     ylab="survival probability")
+legend(120, 1.0, c("Stable","Oxy_drop"), lty=c(1,3))
 
 
+### new try ###
 
-
-
-
-
+createKMtable <- function(subset){
+  num_patients <- nrow(subset)
+  df <-
+    subset %>%
+    arrange(survival_time) %>%
+    group_by(survival_time) %>%
+    mutate(cum_c = cumsum(censor)) %>% # in each day, how many are censored
+    mutate(cum_d = cumsum(event)) %>% # in each day, how many are dead
+    select(survival_time, cum_c, cum_d) %>% 
+    filter(row_number()==n()) %>% 
+    ungroup() %>%
+    rbind(data.frame(survival_time=0, cum_c=0, cum_d=0),.) %>%
+    mutate(dead_bythisday=cumsum(cum_d)) %>%
+    mutate(censored_bythisday=cumsum(cum_c)) %>%
+    mutate(alive=num_patients-dead_bythisday-censored_bythisday) %>%
+    mutate(P=(alive+cum_c)/(alive+cum_c+cum_d)) %>%
+    mutate(st=cumprod(P))
+    return (df)
+}
+KM_oxydrop <- createKMtable(subset_oxydrop) 
+KM_oxydrop2 <- 
+  KM_oxydrop %>%
+  cbind(oxy_drop=rep("oxy_drop", nrow(KM_oxydrop)))
+KM_stable <- createKMtable(subset_stable) 
+KM_stable2 <- 
+  KM_stable %>%
+  cbind(oxy_drop=rep("stable", nrow(KM_stable)))
+KM_to_plot <-
+  KM_oxydrop2 %>%
+  rbind(KM_stable2)
+ggplot(KM_to_plot, aes(x=survival_time, y=st, color=oxy_drop)) +
+  geom_line() +
+  labs(x="survival time (day)", y='Survival Function')
 
 
 
