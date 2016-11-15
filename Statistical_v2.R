@@ -379,13 +379,25 @@ createKMtable <- function(subset){
     mutate(censored_bythisday=cumsum(cum_c)) %>%
     mutate(alive=num_patients-dead_bythisday-censored_bythisday) %>%
     mutate(P=(alive+cum_c)/(alive+cum_c+cum_d)) %>%
-    mutate(st=cumprod(P))
-    return (df)
+    mutate(st=cumprod(P)) %>%
+    select(survival_time, st)
+  df2 <-    # one day and above one day, use survival time column from this
+    df %>%
+    filter(row_number()<n())
+  df3 <-  # survival function from 1 
+    df %>%
+    filter(row_number()>1)
+  to_append <-
+    data.frame(survival_time=df2$survival_time, st=df3$st)
+  df_final <-
+    rbind(df, to_append)
+    return (df_final)
 }
 KM_oxydrop <- createKMtable(subset_oxydrop) 
 KM_oxydrop2 <- 
   KM_oxydrop %>%
   cbind(oxy_drop=rep("oxy_drop", nrow(KM_oxydrop)))
+
 KM_stable <- createKMtable(subset_stable) 
 KM_stable2 <- 
   KM_stable %>%
