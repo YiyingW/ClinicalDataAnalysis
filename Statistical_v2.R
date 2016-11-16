@@ -366,17 +366,28 @@ coxph(surv_obj ~ ., data=as.data.frame(feature_matrix))
 
 # 3.1 Creating training and test sets
 set.seed(1)
-trainIndex <- createDataPartition(outcome, p=0.8, list=FALSE)
-trainFeatures <- feature_matrix_filtered[trainIndex,]
-trainOutcome <- outcome[trainIndex]
+PredictiveMatrix <- as.data.frame(cbind(outcome, feature_matrix_filtered)) # column 1 is outcome
+trainIndex <- createDataPartition(PredictiveMatrix$outcome, p=0.8, list=FALSE)
+trainingSet <- PredictiveMatrix[trainIndex,]
+testSet <- PredictiveMatrix[-trainIndex,]
 
-testFeatures <- feature_matrix_filtered[-trainIndex,]
-testOutcome <- outcome[-trainIndex]
+# 3.2 Exploratory Modeling
+# 3.2.1 Exploratory Elastic Net, LASSO, lambda=0.01, alpha=1
+grid1 <- expand.grid(.alpha=1,.lambda=0.01)
+LASSOFit1 <- train(outcome ~ ., data=trainingSet,
+                   method="glmnet",
+                   tuneGrid=grid1)
+predicted_result <- predict(LASSOFit1, newdata=testSet)
+postResample(pred=predicted_result, obs=testSet$outcome)
+# accuracy on test set is 0.8263
 
-
-
-
-
+# 3.2.1 Performance Metrics
+confusionMatrix(data=predicted_result, reference=testSet$outcome)
+# sensitivity = 0.14286 
+# specificity = 0.97876  
+# A strategy or rule I could use to get a reasonable misclassification accuracy in this
+# unbalanced data without using any model or statistics is to always predict survived. 
+# Using this strategy on test set has an accuracy of 0.8.
 
 
 
