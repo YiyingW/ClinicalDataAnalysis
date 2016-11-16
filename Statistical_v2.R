@@ -282,87 +282,6 @@ patients_survival <-
 # 2.3.2 Kaplan-Meier Curves
 
 # My code
-createKMtable <- function(rawdata){ # rawdata is a dataframe has four columns: survival_time, oxy_drop, censor, event
-  longest_time <- max(rawdata$survival_time)
-  time_intervals <-
-    rawdata %>%
-    filter(censor==0) %>%
-    arrange(survival_time) %>%
-    select(survival_time) %>%
-    unique()
-  n_total <- nrow(rawdata)
-  KM_table <-
-    rawdata %>%
-    arrange(survival_time) %>%
-    mutate(day=ifelse(censor==1, survival_time+0.1, survival_time)) %>%
-    mutate(cum_d=cumsum(event)) %>%
-    mutate(cum_c=cumsum(censor)) %>%
-    select(day, cum_d, cum_c) %>%
-    group_by(day) %>%
-    top_n(n=1, wt=cum_d) %>%
-    ungroup() %>%
-    rbind(c(0, 0, 0),.) %>%
-    mutate(dj=cum_d-lag(cum_d)) %>%
-    mutate(cj=lead(cum_c)-cum_c) %>%
-    right_join(., time_intervals, by=c('day'='survival_time')) %>%
-    mutate(loss=dj+cj) %>%
-    mutate(acum_loss=cumsum(loss)) %>%
-    rbind(c(0,0,0,0,0,0,0),.) %>%
-    mutate(nj=n_total-lag(acum_loss)) %>%
-    mutate(pi=(nj-dj)/nj) %>%
-    right_join(., time_intervals, by=c('day'='survival_time')) %>%
-    mutate(st=cumprod(pi)) %>%
-    select(day, st) %>%
-    rbind(c(0,1),.) 
-  lowest_prob <- min(KM_table$st)
-  KM_table2 <-
-    KM_table %>%
-    mutate(st2=lag(st)) %>%
-    select(day, st2) %>%
-    rename(st=st2) %>%
-    rbind(.,KM_table) %>%
-    rbind(., c(longest_time, lowest_prob)) %>%
-    drop_na()
-  return (KM_table2)
-}
-
-subset_oxydrop <- 
-  patients_survival %>%
-  filter(oxy_drop=="oxy_drop")
-KM_oxydrop <- createKMtable(subset_oxydrop) 
-KM_oxydrop2 <- 
-  KM_oxydrop %>%
-  cbind(oxy_drop=rep("oxy_drop", nrow(KM_oxydrop)))
-
-
-subset_stable <- 
-  patients_survival %>%
-  filter(oxy_drop=="stable")
-KM_stable <- createKMtable(subset_stable) 
-KM_stable2 <- 
-  KM_stable %>%
-  cbind(oxy_drop=rep("stable", nrow(KM_stable)))
-
-KM_to_plot <-
-  KM_oxydrop2 %>%
-  rbind(KM_stable2)
-
-
-ggplot(KM_to_plot, aes(x=day, y=st, color=oxy_drop)) +
-  geom_line() +
-  labs(x="survival time (day)", y='proportion surviving')
-
-# use packages
-library(survival)
-surv_curve <- survfit(Surv(survival_time, event)~strata(oxy_drop), 
-                      patients_survival)
-plot(surv_curve, lty=c(1,3), xlab="survival time (day)",
-     ylab="survival probability")
-legend(120, 1.0, c("Stable","Oxy_drop"), lty=c(1,3))
-
-
-### new try ###
-
 createKMtable <- function(subset){
   num_patients <- nrow(subset)
   df <-
@@ -391,8 +310,18 @@ createKMtable <- function(subset){
     data.frame(survival_time=df2$survival_time, st=df3$st)
   df_final <-
     rbind(df, to_append)
-    return (df_final)
+  return (df_final)
 }
+
+subset_oxydrop <- 
+  patients_survival %>%
+  filter(oxy_drop=="oxy_drop")
+
+subset_stable <- 
+  patients_survival %>%
+  filter(oxy_drop=="stable")
+
+
 KM_oxydrop <- createKMtable(subset_oxydrop) 
 KM_oxydrop2 <- 
   KM_oxydrop %>%
@@ -408,6 +337,52 @@ KM_to_plot <-
 ggplot(KM_to_plot, aes(x=survival_time, y=st, color=oxy_drop)) +
   geom_line() +
   labs(x="survival time (day)", y='Survival Function')
+
+# use packages
+library(survival)
+
+# create the survival object
+surv_obj <- Surv(patients_survival$survival_time, patients_survival$event)
+surv_curve <- survfit(surv_obj ~ patients_survival$oxy_drop, conf.type = "log-log")
+plot(surv_curve, col=c("red", "blue"),conf.int=TRUE, mark.time=TRUE,
+     xlab="survival time (day)", ylab="survival function")
+legend(130, 0.95, c("oxy_drop","stable"), bty='n',lty=1,col=c("red","blue"))
+
+
+# log-rank test
+# survdiff(surv_obj~ patients_survival$oxy_drop)
+# what these packages can do and my code cannot do? 
+# 1. mark.time: curves are marked at each censoring time which is not also a 
+# death time. If mark.time is a numeric vector, then curves are marked at the specified time points.
+# 2. Plot 95% confidence interval 
+
+
+# 2.3.3 Cox proportional hazards models
+
+coxph(surv_obj ~ ., data=as.data.frame(feature_matrix))
+
+
+# 3. Predictive Analyses
+
+# 3.1 Creating training and test sets
+set.seed(1)
+trainIndex <- createDataPartition(outcome, p=0.8, list=FALSE)
+trainFeatures <- feature_matrix_filtered[trainIndex,]
+trainOutcome <- outcome[trainIndex]
+
+testFeatures <- feature_matrix_filtered[-trainIndex,]
+testOutcome <- outcome[-trainIndex]
+
+
+
+
+
+
+
+
+
+
+
 
 
 
