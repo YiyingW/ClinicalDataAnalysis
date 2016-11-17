@@ -466,6 +466,42 @@ ggplot(calibration_plot) +
 
 
 # 3.3 Cross-Validation with the Elastic Net
+# 3.3.1 Cross-validation the elastic net in caret
+set.seed(1)
+ENfitControl <- trainControl(## 4-fold CV
+  method="repeatedcv",
+  number=4,
+  repeats=1,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+ENGrid <- expand.grid(.lambda=seq(-6.5, -2, by=0.5), .alpha=c(0.1,0.5,0.9))
+ENmodel <- train(outcome~., data=trainingSet,
+                 method="glmnet",
+                 trControl=ENfitControl,
+                 tuneGrid=ENGrid,
+                 metric="ROC")
+plot(ENmodel)
+# the values that produced the best result is lpha = 0.1 and lambda = -2. AUC=0.6900794
+
+# 3.3.2 Model Performance
+library(pROC)
+predicted_prob_ENmodel <- predict(ENmodel, newdata=testSet, type='prob')
+real_binary <- # convert test set outcome, died to 1, survivied to 0
+  testSet %>%
+  mutate(real_outcome=ifelse(outcome=="died", 1, 0)) %>%
+  select(real_outcome)
+pROC::auc(real_binary$real_outcome, predicted_prob_ENmodel$died)
+# 0.7466 it is a little bit higher than what was estimated by cross validation
+
+# 3.3.3 Test Error Estimation After feature selection
+
+
+
+
+
+
+
 
 
 
