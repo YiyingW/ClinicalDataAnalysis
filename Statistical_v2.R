@@ -471,7 +471,6 @@ set.seed(1)
 ENfitControl <- trainControl(## 4-fold CV
   method="repeatedcv",
   number=4,
-  repeats=1,
   summaryFunction = twoClassSummary,
   classProbs = TRUE
 )
@@ -497,8 +496,52 @@ pROC::auc(real_binary$real_outcome, predicted_prob_ENmodel$died)
 # 3.3.3 Test Error Estimation After feature selection
 
 
+# 3.4 Cross Validation with Gradient boosted trees
+# 3.4.1 parameters for gradient boosted trees
+# parameter   class                   label
+# 1           n.trees numeric      # Boosting Iterations
+# 2 interaction.depth numeric          Max Tree Depth
+# 3         shrinkage numeric               Shrinkage
+# 4    n.minobsinnode numeric    Min. Terminal Node Size
+
+# increase n.trees will decrease the bias and increase the variance. Setting it too high may overfit
+# increase interaction.depth will decrease the bias and increase the variance
+# increase shrinkage improve the generalizatio of the model. so increase bias and decrease variance. 
+# increase n.minobsinnode will decrease the bias and increase the variance
 
 
+# 3.4.2 Cross-validation GBT 
+set.seed(1)
+GBTfitControl <- trainControl(## 4-fold CV
+  method="repeatedcv",
+  number=4,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+GBTGrid <- expand.grid(
+  interaction.depth=3,
+  n.minobsinnode=3,
+  shrinkage=0.1,
+  n.trees=seq(5, 250, by=5)
+)
+GBTmodel <- train(outcome~., data=trainingSet,
+                 method="gbm",
+                 trControl=GBTfitControl,
+                 tuneGrid=GBTGrid,
+                 metric="ROC")
+ggplot(GBTmodel)
+# best parameter set:
+# shrinkage: 0.1, n.minobsinnode=3, interaction.depth=3, n.trees=195.
+# AUC: 0.7093272,   Sensitivity: 0.146825397, Specificity: 0.9681416
+
+# 3.4.3 Model Performance, Plot the test set ROC curve for this model
+predicted_prob_GBTmodel <- predict(GBTmodel, newdata=testSet, type='prob')
+real_binary <- # convert test set outcome, died to 1, survivied to 0
+  testSet %>%
+  mutate(real_outcome=ifelse(outcome=="died", 1, 0)) %>%
+  select(real_outcome)
+auc <- pROC::auc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
+plot.roc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
 
 
 
