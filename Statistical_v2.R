@@ -543,9 +543,11 @@ real_binary <- # convert test set outcome, died to 1, survivied to 0
 auc <- pROC::auc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
 plot.roc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
 
+# 3.4.4 Variable Importance
+GBTImp <- varImp(GBTmodel, scale=FALSE)
 
 
-
+# 3.4.5 Partial Dependence Plots
 
 
 
