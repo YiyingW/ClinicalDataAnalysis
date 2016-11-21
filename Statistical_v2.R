@@ -366,7 +366,9 @@ coxph(surv_obj ~ ., data=as.data.frame(feature_matrix))
 
 # 3.1 Creating training and test sets
 set.seed(1)
-PredictiveMatrix <- as.data.frame(cbind(outcome, feature_matrix_filtered)) # column 1 is outcome
+
+PredictiveMatrix <- data.frame(lapply(data.frame(cbind(outcome, feature_matrix_filtered), stringsAsFactors = FALSE), type.convert))
+
 trainIndex <- createDataPartition(PredictiveMatrix$outcome, p=0.8, list=FALSE)
 trainingSet <- PredictiveMatrix[trainIndex,]
 testSet <- PredictiveMatrix[-trainIndex,]
@@ -524,7 +526,7 @@ GBTGrid <- expand.grid(
   shrinkage=0.1,
   n.trees=seq(5, 250, by=5)
 )
-GBTmodel <- train(outcome~., data=trainingSet,
+GBTmodel <- train(a1~., data=trainingSet,
                  method="gbm",
                  trControl=GBTfitControl,
                  tuneGrid=GBTGrid,
@@ -544,10 +546,8 @@ auc <- pROC::auc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
 plot.roc(real_binary$real_outcome, predicted_prob_GBTmodel$died)
 
 # 3.4.4 Variable Importance
-GBTImp <- varImp(GBTmodel, scale=FALSE)
+GBTImp <- varImp(GBTmodel, useModel=TRUE)
 
 
 # 3.4.5 Partial Dependence Plots
-
-
 
