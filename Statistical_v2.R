@@ -378,15 +378,18 @@ testSet <- PredictiveMatrix[-trainIndex,]
 grid1 <- expand.grid(.alpha=1,.lambda=0.01)
 LASSOFit1 <- train(outcome ~ ., data=trainingSet,
                    method="glmnet",
+                   family="binomial",
                    tuneGrid=grid1)
 predicted_result <- predict(LASSOFit1, newdata=testSet)
 postResample(pred=predicted_result, obs=testSet$outcome)
-# accuracy on test set is 0.8263
+# accuracy on test set is 
+# Accuracy     Kappa 
+# 0.8364689 0.2175817 
 
 # 3.2.1 Performance Metrics
 confusionMatrix(data=predicted_result, reference=testSet$outcome)
-# sensitivity = 0.14286 
-# specificity = 0.97876  
+# sensitivity = 0.16667
+# specificity = 0.98584  
 # A strategy or rule I could use to get a reasonable misclassification accuracy in this
 # unbalanced data without using any model or statistics is to always predict survived. 
 # Using this strategy on test set has an accuracy of 0.8.
@@ -479,11 +482,12 @@ ENfitControl <- trainControl(## 4-fold CV
 ENGrid <- expand.grid(.lambda=seq(-6.5, -2, by=0.5), .alpha=c(0.1,0.5,0.9))
 ENmodel <- train(outcome~., data=trainingSet,
                  method="glmnet",
+                 family="binomial",
                  trControl=ENfitControl,
                  tuneGrid=ENGrid,
                  metric="ROC")
 plot(ENmodel)
-# the values that produced the best result is lpha = 0.1 and lambda = -2. AUC=0.6900794
+# the values that produced the best result is alpha = 0.1 and lambda = -2. AUC=0.7256725
 
 # 3.3.2 Model Performance
 library(pROC)
@@ -493,9 +497,13 @@ real_binary <- # convert test set outcome, died to 1, survivied to 0
   mutate(real_outcome=ifelse(outcome=="died", 1, 0)) %>%
   select(real_outcome)
 pROC::auc(real_binary$real_outcome, predicted_prob_ENmodel$died)
-# 0.7466 it is a little bit higher than what was estimated by cross validation
+# 0.7315 it is a little bit higher than what was estimated by cross validation
 
 # 3.3.3 Test Error Estimation After feature selection
+
+# 3.3.5 Inspecting Coefficients
+coefs <- coef(ENmodel$finalModel) # i don't understand why dim is 509, 100
+as.matrix(coef(ENmodel$finalModel, s=0.1))
 
 
 # 3.4 Cross Validation with Gradient boosted trees
@@ -526,7 +534,7 @@ GBTGrid <- expand.grid(
   shrinkage=0.1,
   n.trees=seq(5, 250, by=5)
 )
-GBTmodel <- train(a1~., data=trainingSet,
+GBTmodel <- train(outcome~., data=trainingSet,
                  method="gbm",
                  trControl=GBTfitControl,
                  tuneGrid=GBTGrid,
