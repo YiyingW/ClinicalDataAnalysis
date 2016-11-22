@@ -466,7 +466,7 @@ ggplot(calibration_plot) +
   geom_abline(linetype = "dashed")+
   geom_smooth(method="lm",aes(x=observed, y=expected), na.rm=TRUE, se=FALSE) +
   annotate("text", x=0.1, y=0.9, label="R_squared = ", size=4) +
-  annotate("text", x=0.27, y=0.9, label=as.character(r_squared), size=4)
+  annotate("text", x=0.3, y=0.9, label=as.character(r_squared), size=4)
 
 
 
@@ -479,7 +479,7 @@ ENfitControl <- trainControl(## 4-fold CV
   summaryFunction = twoClassSummary,
   classProbs = TRUE
 )
-ENGrid <- expand.grid(.lambda=seq(-6.5, -2, by=0.5), .alpha=c(0.1,0.5,0.9))
+ENGrid <- expand.grid(.lambda=exp(seq(-6.5, -2, by=0.5)), .alpha=c(0.1,0.5,0.9))
 ENmodel <- train(outcome~., data=trainingSet,
                  method="glmnet",
                  family="binomial",
@@ -487,7 +487,7 @@ ENmodel <- train(outcome~., data=trainingSet,
                  tuneGrid=ENGrid,
                  metric="ROC")
 plot(ENmodel)
-# the values that produced the best result is alpha = 0.1 and lambda = -2. AUC=0.7256725
+# the values that produced the best result is alpha = 0.5 and lambda = 0.01831564. AUC=0.7985040
 
 # 3.3.2 Model Performance
 library(pROC)
@@ -497,14 +497,22 @@ real_binary <- # convert test set outcome, died to 1, survivied to 0
   mutate(real_outcome=ifelse(outcome=="died", 1, 0)) %>%
   select(real_outcome)
 pROC::auc(real_binary$real_outcome, predicted_prob_ENmodel$died)
-# 0.7315 it is a little bit higher than what was estimated by cross validation
+# 0.8097 it is a little bit higher than what was estimated by cross validation
 
 # 3.3.3 Test Error Estimation After feature selection
 
 # 3.3.5 Inspecting Coefficients
-coefs <- coef(ENmodel$finalModel) # i don't understand why dim is 509, 100
-as.matrix(coef(ENmodel$finalModel, s=0.1))
+# coefs <- coef(ENmodel$finalModel) # i don't understand why dim is 509, 100
+coefs <- as.data.frame(as.matrix(coef(ENmodel$finalModel, s=0.01831564)))
+coefs$feature <- rownames(coefs)
+colnames(coefs) <- c("coefficient", "feature")
 
+top_10_feature <-
+  coefs %>%
+  filter(feature != "(Intercept)") %>%
+  mutate(mag_coef = abs(coefficient)) %>%
+  arrange(desc(mag_coef)) %>%
+  head(10)
 
 # 3.4 Cross Validation with Gradient boosted trees
 # 3.4.1 parameters for gradient boosted trees
@@ -529,10 +537,10 @@ GBTfitControl <- trainControl(## 4-fold CV
   classProbs = TRUE
 )
 GBTGrid <- expand.grid(
-  interaction.depth=3,
-  n.minobsinnode=3,
-  shrinkage=0.1,
-  n.trees=seq(5, 250, by=5)
+  interaction.depth=3, # interaction depth at 3
+  n.minobsinnode=3, # minimum observations per node at 3
+  shrinkage=0.1, # shrinkage at 0.1
+  n.trees=seq(5, 250, by=5) # 5 to 250 trees in increments of 5 trees
 )
 GBTmodel <- train(outcome~., data=trainingSet,
                  method="gbm",
@@ -541,8 +549,8 @@ GBTmodel <- train(outcome~., data=trainingSet,
                  metric="ROC")
 ggplot(GBTmodel)
 # best parameter set:
-# shrinkage: 0.1, n.minobsinnode=3, interaction.depth=3, n.trees=195.
-# AUC: 0.7093272,   Sensitivity: 0.146825397, Specificity: 0.9681416
+# shrinkage: 0.1, n.minobsinnode=3, interaction.depth=3, n.trees=95.
+# AUC: 0.8216428,   Sensitivity: 0.29563492, Specificity: 0.9606195
 
 # 3.4.3 Model Performance, Plot the test set ROC curve for this model
 predicted_prob_GBTmodel <- predict(GBTmodel, newdata=testSet, type='prob')
@@ -558,4 +566,9 @@ GBTImp <- varImp(GBTmodel, useModel=TRUE)
 
 
 # 3.4.5 Partial Dependence Plots
+plot(GBTmodel$finalModel, i.var=c("age_in_days","chartvalue_198"))
+plot(GBTmodel$finalModel, i.var=c("age_in_days"),lwd=2, col='blue')
+plot(GBTmodel$finalModel, i.var=c("chartvalue_198"))
 
+
+# GCS is scored between 3 and 15. 3 being the worst. 15 the best. 
