@@ -542,6 +542,7 @@ GBTGrid <- expand.grid(
   shrinkage=0.1, # shrinkage at 0.1
   n.trees=seq(5, 250, by=5) # 5 to 250 trees in increments of 5 trees
 )
+set.seed(1)
 GBTmodel <- train(outcome~., data=trainingSet,
                  method="gbm",
                  trControl=GBTfitControl,
@@ -601,8 +602,71 @@ multivariateModel <- glm(outcome2 ~ ., family = "binomial", data=regression_mode
 # beta for oxy_drop is 0.315069
 exp(0.315069) # 1.370354
 
+# 4.2 Matching Analysis with Propensity Scores
+# 4.2.1 Propensity Modeling
 
+PropensityFeatures <- 
+  PredictiveMatrix %>%
+  select(-outcome)
+PropensityFeatures$oxy_drop[PropensityFeatures$oxy_drop==1] <- 'drop'
+PropensityFeatures$oxy_drop[PropensityFeatures$oxy_drop==0] <- 'stable'
+PropensityFeatures$oxy_drop <- as.factor(PropensityFeatures$oxy_drop)
 
+set.seed(1)
+PropensityfitControl <- trainControl(## 4-fold CV
+  method="cv",
+  number=4,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+PropensityGrid <- expand.grid(
+  interaction.depth=3, # interaction depth at 3
+  n.minobsinnode=3, # minimum observations per node at 3
+  shrinkage=0.1, # shrinkage at 0.1
+  n.trees=seq(5, 250, by=5) # 5 to 250 trees in increments of 5 trees
+)
+set.seed(1)
+Propensitymodel <- train(oxy_drop~., data=PropensityFeatures,
+                  method="gbm",
+                  trControl=PropensityfitControl,
+                  tuneGrid=PropensityGrid,
+                  metric="ROC")
+ggplot(Propensitymodel)
+
+# 4.2.2 
+library(car)
+propensity_score <- predict(Propensitymodel, newdata=PropensityFeatures, type='prob')
+propensity_summary <-as.data.frame(cbind(PredictiveMatrix$oxy_drop, propensity_score$drop))
+colnames(propensity_summary) <- c('oxy_drop', 'prob')
+logit_propensity <-
+  propensity_summary %>%
+  mutate(logit_prop=logit(prob))
+logit_propensity$oxy_drop[logit_propensity$oxy_drop==1] <- 'drop'
+logit_propensity$oxy_drop[logit_propensity$oxy_drop==0] <- 'stable'
+qplot('logit_prop', logit_propensity, color='oxy_drop')
+
+ggplot(logit_propensity, aes(logit_prop, color=oxy_drop)) +
+  geom_density()
+
+# 4.2.3 Caliper Matching
+library(Matching)
+Tr <- PredictiveMatrix$oxy_drop # treatment variable
+Y <- PredictiveMatrix$outcome
+X <- logit_propensity$logit_prop
+matched_result <- Match(Tr=Tr, X=X, caliper=0.25, replace=FALSE)
+treated_index <- matched_result$index.treated
+control_index <- matched_result$index.control
+
+# 4.2.4 Matched outcomes analysis
+oxydrop_dat2 <-
+  PredictiveMatrix %>%
+  dplyr::select(outcome,oxy_drop) %>%
+  slice(c(treated_index, control_index))
+
+chisq.test(oxydrop_dat2$oxy_drop, oxydrop_dat2$outcome)
+table(oxydrop_dat2$oxy_drop, oxydrop_dat2$outcome)
+
+# OR = 0.936772939 
 
 
 
