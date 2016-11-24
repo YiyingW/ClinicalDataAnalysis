@@ -359,7 +359,7 @@ legend(130, 0.95, c("oxy_drop","stable"), bty='n',lty=1,col=c("red","blue"))
 
 # 2.3.3 Cox proportional hazards models
 
-coxph(surv_obj ~ ., data=as.data.frame(feature_matrix))
+# coxph(surv_obj ~ ., data=as.data.frame(feature_matrix))
 
 
 # 3. Predictive Analyses
@@ -474,7 +474,7 @@ ggplot(calibration_plot) +
 # 3.3.1 Cross-validation the elastic net in caret
 set.seed(1)
 ENfitControl <- trainControl(## 4-fold CV
-  method="repeatedcv",
+  method="cv",
   number=4,
   summaryFunction = twoClassSummary,
   classProbs = TRUE
@@ -531,7 +531,7 @@ top_10_feature <-
 # 3.4.2 Cross-validation GBT 
 set.seed(1)
 GBTfitControl <- trainControl(## 4-fold CV
-  method="repeatedcv",
+  method="cv",
   number=4,
   summaryFunction = twoClassSummary,
   classProbs = TRUE
@@ -567,8 +567,42 @@ GBTImp <- varImp(GBTmodel, useModel=TRUE)
 
 # 3.4.5 Partial Dependence Plots
 plot(GBTmodel$finalModel, i.var=c("age_in_days","chartvalue_198"))
-plot(GBTmodel$finalModel, i.var=c("age_in_days"),lwd=2, col='blue')
+plot(GBTmodel$finalModel, i.var=c("age_in_days"))
 plot(GBTmodel$finalModel, i.var=c("chartvalue_198"))
 
 
 # GCS is scored between 3 and 15. 3 being the worst. 15 the best. 
+
+
+# 4. Causal Analyses
+# 4.1 Analyses without matching
+# 4.1.1 Univariate Analysis
+# statistical test to see if a drop in oxy is related to mortality is chi-square test 
+# because both variables are binary
+# we already did this in 2.1.1, oxy_drop: oxy_drop -> 1, stable -> 0
+chisq.test(oxydrop_dat$variable, oxydrop_dat$outcome)
+table(regression_model_features$oxy_drop, regression_model_features$outcome)
+
+# died survived
+# 0  391     2092
+# 1  239      733
+
+# odds ratio = 1.744531634
+
+
+# 4.1.2 Multivariate Analyses
+# we already did this in 2.2.1
+regression_model_features2 <-
+  regression_model_features %>%
+  mutate(outcome2=ifelse(outcome=="died", 1, 0)) %>%
+  select(-outcome)
+regression_model_features2$outcome2 <- as.factor(regression_model_features2$outcome2)
+multivariateModel <- glm(outcome2 ~ ., family = "binomial", data=regression_model_features2)
+# beta for oxy_drop is 0.315069
+exp(0.315069) # 1.370354
+
+
+
+
+
+
