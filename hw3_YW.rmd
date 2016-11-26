@@ -1,0 +1,831 @@
+---
+output: pdf_document
+---
+
+# Homework 3: Statistical Analyses of Clinical Datasets
+
+BIOMEDIN 215 (Data Driven Medicine), Fall 2016
+
+Due: Tuesday, November 29, 2016
+
+In this assignment you will gain experience analyzing preprocessed clinical datasets. You will practice using common time-saving tools in the `R` programming language that are ideally suited to these tasks. 
+
+You will work with a dataset that we have prepared for you using a process similar to what you did in HW 2. The dataset describes patients from the [MIMIC III database](https://mimic.physionet.org/mimictables/patients/) who were put on mechanical ventilation and were stable for 12 hours. Some of these patients then experienced a sudden and sustained drop in oxygenation, while others did not. 
+
+We have recorded a variety of features about each patient before the 12-hour mark (the index time), including counts of all prior diagnoses (aggregated with IC), all respiratory-related concepts in their notes, and indicators of events recorded in the patient charts. In addition, we have included demographic features (age and sex). For those chart events which have numeric values associated wtih them (e.g. lab tests) we found those in which a value was recorded for over 85% of the cohort and included the latest recorded value of those features. For the small number of patients who did not have one or more of those features recorded, we used column-mean imputation to impute them. We also recorded whether or not each patient went on to experience a sudden and sustained drop in their oxygenation (the exposure). Finally, we recorded whether or not each patient eventually died during their hospitalization (the outcome). All of that data is contained in `patient_feature_matrix.csv`. Its companion file `feature_descriptions.csv` has descriptions of each of the features and their provenance. The final dataset you have access to is called `cohort.csv`, which contains the index time, exposure time (if any), in-hospital time of death (if any), and the time of censoring (when the patient was released from the hospital).
+
+Please edit this document directly using either Jupyter Notebook or R markdown in R Studio and answer each of the questions below in-line. Jupyter and R markdown are useful tools for reproducible research that you will use over and over again in your later work. They are worth taking the short amount of time necessary to learn them. Turn in a single `.pdf` document showing all of your code and output for the entire assignment, with each question clearly demarcated. Submit your completed assignment through Canvas.
+
+**Grading**: All answers will be graded on the correctness and quality of your code and analyses. Partial credit will be given based on a demonstration of conceptual understanding and how close you can come to solving the problem. At various points we will ask you to produce particular values: the correctness of these numbers will not be used for your grade - they are tools for us to get an idea about what your code is doing.
+
+## 0. Getting Ready
+
+The first thing we need to do is load all of the important packages we will use for this assignment. Please load the packages  `caret`,  `ggplot2`, and `dplyr`. There are several other packages you will need or may want to use during the course of the assignment but if you need a package other than one of these three for a particular problem it will be noted in the problem statement.
+```{r message=FALSE}
+library(caret)
+library(ggplot2)
+library(dplyr)
+```
+
+
+## 1. (20 pts) Preprocessing
+
+### 1.1 (5 pts) Creating Feature Matrix and Outcome Vector
+
+Split the patient matrix up into a numerical matrix of features and a character vector of the outcome (died or survived). For the feature matrix, exclude the subject ID and the outcome variable and use `data.matrix()`. 
+```{r}
+# read in patient_feature_matrix.csv
+patient_feature_matrix <- read.csv("../hw3/data/patient_feature_matrix.csv", as.is = TRUE)
+# convert categorical features into numerical features
+# oxy_drop: oxy_drop -> 1, stable -> 0; gender: M -> 1, F -> 0
+patient_feature_matrix <-
+  patient_feature_matrix %>% 
+  mutate(gender=ifelse(gender=='M', 1, 0)) %>%
+  mutate(oxy_drop=ifelse(oxy_drop=='oxy_drop', 1, 0))
+# split patient matrix into a numerical matrix of features and a character vector of 
+# the outcome
+feature_matrix <-
+  patient_feature_matrix %>%
+  select(-subject_id, -death_in_stay) %>%
+  data.matrix()
+outcome <- patient_feature_matrix$death_in_stay  
+```
+
+
+### 1.2 (15 pts) Removing Uninformative Features
+
+Before we do any modeling, let's cut down on our feature space by removing low-variance features that probably aren't useful enough to measure association with or use in a predictive model. `caret` has a function to do that, so let's use it instead of reinventing the wheel. 
+
+Find the relevant function in the `caret` documentation and use it to create a new patient-feature matrix with only the useful features. From now on we will use the result of this step instead of the full feature matrix. Report how many of each different kind of feature are left after filtering out the near-zero variance features. As a sanity check, look at the kinds of features that are over-represented or under-represented in this set relative to the full set of features. Explain in a sentence if and why the result makes sense to you.
+
+```{r}
+near_zero <- nearZeroVar(feature_matrix) # indices for neare zero variance features
+# exlude near zero variance columns, this matrix will be used in the future
+feature_matrix_filtered <- 
+  feature_matrix[, -near_zero] 
+
+# to find out feature types, read in feature_descriptions.csv
+feature_descriptions <- read.csv("../hw3/data/feature_descriptions.csv", as.is = TRUE)
+# variables left after filtering
+variable_remained <- colnames(feature_matrix_filtered)
+# filter feature_descriptions, only keep remained variables
+feature_descriptions_remained <-
+  feature_descriptions %>%
+  filter(feature %in% variable_remained)
+```
+
+**MY ANWSER:**  
+feature count before filtering
+```{r}
+table(feature_descriptions$feature_type)
+```
+feature count after filtering
+```{r}
+table(feature_descriptions_remained$feature_type)
+```
+If and why the result makes sense?  
+Yes. All icd9 features are filtered out and this makes sense because the icd9 code 
+might be very specific so that for each code there is only a few patients have it
+and the majority of patients have 0. Most of the chartvalue are remained and
+this makes sense since chartvalues are numerical numbers and they are less likely
+to have near zero variances. 
+
+
+## 2. (90 pts) Associative Analyses
+
+In this part of the assignment, you will use statistical tests to evaluate hypotheses about the relationship between  patient features and the binary outcome of whether a patient died during their ICU stay. You will also do a survival analysis using Kaplan-Meier curves and Cox regression to assess whether survival is significantly different between those who experienced a sudden and sustained drop in oxygenation, and those who did not.
+
+### 2.1 (25 pts) Hypothesis testing
+
+#### 2.1.1 (18 pts) Statistical Tests of Differences Between Two Groups
+
+For the features `alarms` (chart indicator), `activity` (chart indicator), `respiratory rate` (chart value), `arterial PaCO2` (chart value), `oxy_drop` (engineered feature) and `snomed ct concept` (note CUI), use a t-test, rank-sum test, Fisher exact test, or a $\chi^2$ (chi squared) test (wichever is most appropriate) to determine if each of these features is associated with mortality. Write your reasoning for determining which kind of test to use. If multiple tests are applicable to a comparison, use all of the applicable tests and compare the results.  
+
+**MY ANWSER:**     
+Step1: find these features' feature name in feature_matrix_filtered:  
+alarms -> chartindicator_1622  
+activity -> chartindicator_31  
+respiratory rate -> chartvalue_618  
+arterial PaCO2 -> chartvalue_778  
+oxy_drop -> oxy_drop  
+snomed ct concept -> C2720507  
+
+Step2: inspect these features and decide which tests to use.   
+Create dataframe for specific feature and outcome, plot the histogram.  
+```{r}
+alarms_dat <- 
+  data.frame(feature_matrix_filtered[,"chartindicator_1622"], outcome)
+colnames(alarms_dat) <- c("variable", "outcome")
+p1 <- ggplot(alarms_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=0.5) +
+        xlab("alarms")
+
+activity_dat <- 
+  data.frame(feature_matrix_filtered[,"chartindicator_31"], outcome)
+colnames(activity_dat) <- c("variable", "outcome")
+p2 <- ggplot(activity_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=0.5) +
+        xlab("activity")
+
+resp_dat <- 
+  data.frame(feature_matrix_filtered[,"chartvalue_618"], outcome)
+colnames(resp_dat) <- c("variable", "outcome")
+p3 <- ggplot(resp_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=0.5) +
+        xlab("respiratory rate")
+
+PaCO2_dat <- 
+  data.frame(feature_matrix_filtered[,"chartvalue_778"], outcome)
+colnames(PaCO2_dat) <- c("variable", "outcome")
+p4 <- ggplot(PaCO2_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=0.5) +
+        xlab("arterial PaCO2")
+
+oxydrop_dat <- 
+  data.frame(feature_matrix_filtered[,"oxy_drop"], outcome)
+colnames(oxydrop_dat) <- c("variable", "outcome")
+p5 <- ggplot(oxydrop_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=1) +
+        xlab("oxydrop")
+
+snomed_dat <- 
+  data.frame(feature_matrix_filtered[,"C2720507"], outcome)
+colnames(snomed_dat) <- c("variable", "outcome")
+p6 <- ggplot(snomed_dat)+
+        geom_histogram(aes(x=variable,colour=outcome),binwidth=1) +
+        xlab("snomed_ct")
+
+library(grid)
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol = 2, 
+             top = "histograms for selected features")
+```
+Based on plotted histograms:
+For features alarms and activity, they have continuous interger numerical values and their distributions are not normal. Rank-sum test should be used.
+For features respiratory rate and arterial PaCO2, they have continuous interger numerical values and their distributions are approximately normal. T test can be used and rank-sum test can also be used. 
+For oxydrop and snomed ct concept, Fisher's Exact test is a way to test the association between two categorical variables when there is a small cell sizes (<5). Chi-square test is used when the cell sizes are expeted to be large. Oxy_drop and snomed ct concept variables can use both of these tests. 
+
+Step3: perform tests
+```{r}
+# alrams
+wilcox.test(alarms_dat[which(outcome=="died"),"variable"], 
+            alarms_dat[which(outcome=="survived"),"variable"], correct = F)
+
+# activity
+wilcox.test(activity_dat[which(outcome=="died"),"variable"], 
+            activity_dat[which(outcome=="survived"),"variable"], correct = F)
+```
+Both variables have p values greater than 0.05. 
+
+```{r}
+# respiratory rate
+wilcox.test(resp_dat[which(outcome=="died"),"variable"], 
+            resp_dat[which(outcome=="survived"),"variable"], correct = F)
+
+t.test(resp_dat[which(outcome=="died"),"variable"], 
+       resp_dat[which(outcome=="survived"),"variable"])
+
+# arterial PaCO2
+wilcox.test(PaCO2_dat[which(outcome=="died"),"variable"], 
+            PaCO2_dat[which(outcome=="survived"),"variable"], correct = F)
+
+t.test(PaCO2_dat[which(outcome=="died"),"variable"], 
+       PaCO2_dat[which(outcome=="survived"),"variable"])
+
+```
+
+T-test and rank-sum test for two variables give similarly small p values. 
+
+
+```{r}
+# oxy_drop
+chisq.test(oxydrop_dat$variable, oxydrop_dat$outcome)
+fisher.test(oxydrop_dat$variable, oxydrop_dat$outcome)
+
+# snomed ct concept
+chisq.test(snomed_dat$variable, snomed_dat$outcome)
+fisher.test(snomed_dat$variable, snomed_dat$outcome)
+
+```
+
+For oxy_drop, two tests give similarly small p values. For snomed ct, two tests give similarly large p values. 
+
+In summary, alarms, activity and snomed ct concept features are not associated with mortality. On the other hand, respiratory rate, arterial PaCO2 and oxy_drop features are associated with mortality at a statistically significant level. 
+
+
+#### 2.1.2 (2pts) Identifying "control" associations
+
+In lecture we discussed the idea of "positive" and "negative" controls to calibrate statistical tests in order to adjust for various systematic biases in the data. If we were to use the association between `snomed ct concept` and mortality as a control, which kind would it be? Why?  
+
+**MY ANWSER:**     
+It would be negative control because snomed ct concept and mortality don't have statistically significant associations with a large p value (> 0.8).  
+
+#### 2.1.3 (5 pts) Hypothesis testing with Bonferroni correction
+
+Use Bonferroni correction to determine the p-value cutoff if you were to evaluate association of all chart value features with death during ICU stay as an outcome. How many chart value features are significantly associated with death at this cutoff? How many chart value features are significantly associated with death (according to a t-test) at the standard cutoff of 0.05?
+```{r}
+# select features from feature matrix that are chart value features
+chartvalue_features <- # a dataframe has all chart value features and outcome
+  feature_matrix_filtered %>%
+  as.data.frame() %>%
+  select(starts_with('chartvalue')) %>%
+  cbind(outcome,.)
+num_chartvalue_features <- ncol(chartvalue_features)-1 # exclude outcome
+corrected_p <- 0.05/num_chartvalue_features
+  
+p_values <- sapply(chartvalue_features[-1], function(x) 
+  unlist(t.test(x~chartvalue_features$outcome)["p.value"]))
+
+# How many chart value features are significantly associated with death at 
+# Bonferroni corrected p value?  
+sum(p_values <= corrected_p)  # 26
+# How many chart value features are significantly associated with death at the standard 
+# cutoff of 0.05?
+sum(p_values <= 0.05)   # 30
+
+```
+
+### 2.2 (30 pts) Adjusted Analyses
+
+In this part of the assignment you will build and compare several regression models for the binary outcome of death during hospitalization.
+
+#### 2.2.1 (10 pts) Regression Models for Association
+
+Use the `glm` package to build 3 models with the following independent variables. Use the kind of regression (set with the `family` parameter) that is appropriate for the data.
+
+1. Age and oxy_drop
+2. Age, gender and oxy_drop
+3. Age, gender, oxy_drop and the chart value features that are signficantly associated with death after Bonferroni correction  
+
+**MY ANWSER:**     
+Create a dataframe for models building. This dataframe has features age, oxy_drop and chart value features that are significantly associated with death after Bonferroni correction. 
+
+```{r}
+# select the chart value names that are significant
+chart_values <- rownames(as.data.frame(p_values))
+signif_chart_value <-
+  p_values %>%
+  as.data.frame() %>%  
+  # row name is the feature_name.p.value, eg, chartvalue_1126.p.value
+  mutate(name=chart_values) %>% # create a column for feature name
+  mutate(name=substr(name, 1, nchar(name)-8)) %>% # cut the proper name
+  filter(.<=corrected_p) %>% # filter based on p value
+  select(name)
+
+# create sub matrix for building regression models
+regression_model_features <-
+  feature_matrix_filtered %>%
+  as.data.frame() %>%
+  select(age_in_days, oxy_drop, gender, one_of(signif_chart_value$name)) %>%
+  cbind(outcome,.) %>%
+  mutate(outcome=ifelse(outcome=="died", 1, 0))
+
+model1 <- glm(outcome ~ age_in_days + oxy_drop, family = "binomial", 
+              data=regression_model_features)
+model2 <- glm(outcome ~ age_in_days + gender + oxy_drop, family = "binomial",
+              data=regression_model_features)
+model3 <- glm(outcome ~ ., family = "binomial", data=regression_model_features)
+```
+
+
+#### 2.2.2 (10 pts) Comparing regression models
+
+What is the coefficient for `oxy_drop` in each model and what is its confidence interval? Why does the point estimate change as more features are added? Assuming you had a model of $Y$ regressed on $X_1$ and you added the variable $X_2$, under what conditions would the coefficient for $X_1$ not change? If both are positively correlated with the outcome and with each other, what would happen to the coefficient of $X_1$ after adding $X_2$? Why?   
+
+**MY ANWSER:**    
+What is the coefficient for `oxy_drop` in each model and what is its confidence interval?  
+    In model1: coefficient for oxy_drop is 5.747e-01, its confidence interval is (3.900444e-01, 7.581675e-01).
+    In model2: coefficient for oxy_drop is 5.778e-01, its confidence interval is (3.928747e-01, 7.615069e-01).
+    In model3: coefficient for oxy_drop is 3.151e-01, its confidence interval is (1.060480e-01, 5.226494e-01).  
+    
+Why does the point estimate change as more features are added?  
+The point estimate changes as more features are added because the newly added features are correlated with that parameter's corresponding variable and correlated with the response variable as well.   
+
+Assuming you had a model of $Y$ regressed on $X_1$ and you added the variable $X_2$, under what conditions would the coefficient for $X_1$ not change?  
+If adding X2 doesn't change X1 coefficient, then X2 is not correlated with X1 and it is not correlated with Y.
+
+If both are positively correlated with the outcome and with each other, what would happen to the coefficient of $X_1$ after adding $X_2$? Why?   
+The coefficient of X1 after adding X2 will decrease because some of the marginal effect of X1 is being taken up by the addition of X2.
+
+#### 2.2.3 (7 pts) Legitimancy of Confidence Intervals
+
+Assuming there are no systematic biases in the data and the only errors are from random sampling noise, do you think these confidence intervals are legitimate for all of these models, for none of them, or only for some of them? Explain your answer. If you said any of the confidence intervals are not legitimate, explain what you could change about the modeling procedure to make them so.  
+
+**MY ANWSER:**    
+I think these confidence intervals are legitimate for all of these models. I came to this conclusion by comparing the size of the confidence intervals which indicates the size of the standard errors of coefficient for oxy_drop. Model1's oxy_drop coefficent confidence interval's size is 0.3681231. Model2's oxy_drop coefficent confidence interval's size is 0.3686322. Model1's oxy_drop coefficent confidence interval's size is 0.4166014. As adding more features, the coefficent's confidence interval is getting bigger, implying the standard errors for coefficent is becoming bigger. This makes sense because the more correlated the features are with each other, the bigger the standard errors become for their coefficents, and the less likely it is that a coefficient will be statistically significant. This is known as the problem of multicollinearity. Model3 compared with model1 and model2 has more correlated independent variables, therefore, it is more difficult to determine how much variation in outcome that oxy_drop is responsible for. As a result, the standard errors for oxy_drop's coefficent become larger.   
+
+#### 2.2.4 (3 pts) Testing Residuals
+
+One way to compare models that use an increasing number of features is to test whether the residuals (the differences between the true outcome and the predicted outcome) are significantly different from each other. In `R`, you can do that with the `anova` function by passing it a series of (generalized) linear models. Compare the 3 models you built in 2.2.1. Which model explains the most variance in the outcome variable?  
+
+```{r}
+anova(model1, model2, model3)
+```
+**MY ANWSER:**    
+Compared with model1, model2 explains 0.45 more variance in the outcome variable.
+Compared with model2, model3 explains 447.32 more variance in the outcome variable.
+Model3 explains the most variance in the outcome variable. 
+
+
+### 2.3 (35 pts) Survival Analysis
+
+In this part of the assignment you will use your own code and `coxph` to fit survival (time-to-event) models. 
+
+#### 2.3.1 (5 pts) Creating Survival Data
+
+Use the `cohort.csv` data to calculate the survival time (until death or censoring) for all patients. Use the `index_time`, `deathtime` and `censor_time` columns, as well as the function `mutate` to accomplish this. The time unit should be in days. Save these data in a new data frame called `patients_survival` that also keeps track of the `oxy_drop` value for each patient.
+
+```{r}
+cohort <- read.csv("../hw3/data/cohort.csv", as.is = TRUE)
+patients_survival <-
+  cohort %>%
+  select(index_time, censor_time, oxy_drop, death_in_stay) %>%
+  mutate(survival_time=ceiling(as.numeric(difftime(as.POSIXct(censor_time), 
+                                                   as.POSIXct(index_time), units='days')))) %>%
+  mutate(censor=ifelse(death_in_stay=='died', 0, 1)) %>%
+  mutate(event=ifelse(death_in_stay=='died', 1, 0)) %>%
+  select(survival_time, oxy_drop, censor, event)
+
+```
+Note: patients_survival has four columns. survival_time, oxy_drop, censor(0=died, 1=censored), event (0=censored, 1=died). 
+
+
+#### 2.3.2 (20 pts) Kaplan-Meier Curves
+
+Use your `patients_survival` data and `dplyr` and `ggplot2` to write your own code to generate Kaplan-Meier curves for patients who suffered a sudden and sustained drop in oxygenation and those who did not. Display both curves on the same plot in different colors. The functions `cumsum()` and `cumprod()` will likely come in handy. There are also some packages available that will calculate survival statistics and Kaplan-Meier plots for you, such as `survival` and `survminer`. Use functions in these packages to generate Kaplan-Meier curves for the survival data you created above. How do they compare to the curves generated with your code? What features do these packages provide that your code does not?  
+
+My code for creating Kaplan-Meier plots:
+```{r}
+createKMtable <- function(subset){
+  num_patients <- nrow(subset)
+  df <-
+    subset %>%
+    dplyr::arrange(survival_time) %>%
+    dplyr::group_by(survival_time) %>%
+    dplyr::mutate(cum_c = cumsum(censor)) %>% # in each day, how many are censored
+    dplyr::mutate(cum_d = cumsum(event)) %>% # in each day, how many are dead
+    dplyr::select(survival_time, cum_c, cum_d) %>% 
+    dplyr::filter(row_number()==n()) %>% 
+    dplyr::ungroup() %>%
+    rbind(data.frame(survival_time=0, cum_c=0, cum_d=0),.) %>%
+    dplyr::mutate(dead_bythisday=cumsum(cum_d)) %>%
+    dplyr::mutate(censored_bythisday=cumsum(cum_c)) %>%
+    dplyr::mutate(alive=num_patients-dead_bythisday-censored_bythisday) %>%
+    dplyr::mutate(P=(alive+cum_c)/(alive+cum_c+cum_d)) %>%
+    dplyr::mutate(st=cumprod(P)) %>%
+    dplyr::select(survival_time, st)
+  df2 <-    # one day and above one day, use survival time column from this
+    df %>%
+    dplyr::filter(row_number()<n())
+  df3 <-  # survival function from 1 
+    df %>%
+    dplyr::filter(row_number()>1)
+  to_append <-
+    data.frame(survival_time=df2$survival_time, st=df3$st)
+  df_final <-
+    rbind(df, to_append)
+  return (df_final)
+}
+
+subset_oxydrop <- 
+  patients_survival %>%
+  dplyr::filter(oxy_drop=="oxy_drop")
+
+subset_stable <- 
+  patients_survival %>%
+  dplyr::filter(oxy_drop=="stable")
+
+
+KM_oxydrop <- createKMtable(subset_oxydrop) 
+KM_oxydrop2 <- 
+  KM_oxydrop %>%
+  cbind(oxy_drop=rep("oxy_drop", nrow(KM_oxydrop)))
+
+KM_stable <- createKMtable(subset_stable) 
+KM_stable2 <- 
+  KM_stable %>%
+  cbind(oxy_drop=rep("stable", nrow(KM_stable)))
+KM_to_plot <-
+  KM_oxydrop2 %>%
+  rbind(KM_stable2)
+ggplot(KM_to_plot, aes(x=survival_time, y=st, color=oxy_drop)) +
+  geom_line() +
+  labs(x="survival time (day)", y='Survival Function') +
+  scale_y_continuous(limits=c(0, 1),breaks=seq(0, 1, by = 0.2))
+```
+
+Use functions in these packages to generate Kaplan-Meier curves for the survival data you created above. How do they compare to the curves generated with your code? What features do these packages provide that your code does not?  
+```{r}
+library(survival)
+
+# create the survival object
+surv_obj <- Surv(patients_survival$survival_time, patients_survival$event)
+surv_curve <- survfit(surv_obj ~ patients_survival$oxy_drop, conf.type = "log-log")
+plot(surv_curve, col=c("red", "blue"),conf.int=TRUE, mark.time=TRUE,
+     xlab="survival time (day)", ylab="survival function")
+legend(130, 0.95, c("oxy_drop","stable"), bty='n',lty=1,col=c("red","blue"))
+
+```
+
+Comparing the curves generated by my code with the curves generated by the package, they have the same shape and same y values for each x value. There are two features these packages provide that my code does not: 1. it can generate and plot confidence intervals for each curve. There is also option that users can plot confidence bar on the curves for specifiied times. 2. The optiom 'mark.time' can mark the curves at each censoring time which is not also a death time. Users can also give a numeric vector so the curves will be marked at the specific time points. 
+
+#### 2.3.3 (10 pts) Cox Proportional Hazards Models
+
+Use your `patients_survial` data combined with the patient feature matrix to run a univariate cox proportional hazards model of mortality regressed on a drop in oxygenation. Don't worry if you get a warning message about convergence. What is the value of the coefficient and its confidence interval? Also run a model adjusted for all of the non-zero variance features. What is the value of the coefficient for the drop in oxygenation and its confidence interval in that model? What is an explanation for the difference in the results?  
+
+Univariate cox proportional hazards model of mortality regressed on a drop in oxygenation. 
+```{r}
+uni.model <- coxph(surv_obj~feature_matrix_filtered[, 'oxy_drop'])
+summary(uni.model)
+```
+
+The value of coefficient is 0.06528 and thus the odds ratio is exp(coef) = 1.067. The confidence interval for exp(coef) (odds ratio) is 0.9063 to 1.257.  
+
+Multivariate cox proportional hazards model including all of the non-zero variance features.   
+```{r}
+multi.model <- coxph(surv_obj~feature_matrix_filtered)
+#summary(multi.model)
+```
+
+feature_matrix_filteredoxy_drop            -2.417403e-01 7.852601e-01 1.098356e-01 -2.2009289356 2.774106e-02
+
+## 3. (120 pts) Predictive Analyses
+
+In this part of the assignment we will see if we can predict which patients will die during their hospitalizations,  given only the data from before the end of their 12-hour long stable ventiliation period.
+
+We will use the [`caret`](caret.r-forge.r-project.org) library for our predictive modeling tasks, so take a minute to acquaint yourself with it. 
+
+*Note on replicability*: Many of the exercises below require you to run code that has some amount of randomness to it. To ensure that you get the same answer as everyone else, we will ask you to run `set.seed(1)` at various points. `caret` has the ability to run models in parallel across multiple cores, but we ask that you do not do this because each thread requires its own random seed and the results will not reconcile with single-core results.
+
+*Note on packages and masking*: You will load many packages in these exercises and some of them will import functions with names that conflict with other functions. To call the function from the package that you want, you can use the `::` qualifier as in `package::function()`. For example, if both `dplyr` and `plyr` are loaded, you would use `dplyr::summarize()` to call `dplyr`'s summarize and `plyr::summarize()` to call `plyr`'s summarize.
+
+### 3.1 (5 pts)  Creating training and test sets
+
+To find out how good the predictive models we will make are, we'll need to randomly split the data into training and test sets. 
+
+Use `caret` to make training and test sets that preserve the proportions of the outcome in each dataset. Use an 80% training / 20% testing split. Use `set.seed(1)` to ensure that you will get the same random split as everyone else.
+
+```{r}
+# PredictiveMatrix is a data frame with outcome being factor and other features as numeric
+PredictiveMatrix <- data.frame(lapply(data.frame(cbind(outcome, feature_matrix_filtered), 
+                                                 stringsAsFactors = FALSE), type.convert)) 
+set.seed(1)
+trainIndex <- createDataPartition(PredictiveMatrix$outcome, p=0.8, list=FALSE)
+trainingSet <- PredictiveMatrix[trainIndex,]
+testSet <- PredictiveMatrix[-trainIndex,]
+
+```
+
+
+### 3.2 (35 pts) Exploratory Modeling
+
+#### 3.2.1 (12 pts) Exploratory Elastic Net
+
+Fit an elastic net model on the training data and use it to predict on the test set. Use $\lambda=0.01$ and $\alpha=1$ (LASSO). 
+
+What is the missclassification accuracy of the resulting model?
+
+```{r}
+grid1 <- expand.grid(.alpha=1,.lambda=0.01)
+LASSOFit1 <- train(outcome ~ ., data=trainingSet,
+                   method="glmnet",
+                   family="binomial",
+                   tuneGrid=grid1)
+predicted_result <- predict(LASSOFit1, newdata=testSet)
+postResample(pred=predicted_result, obs=testSet$outcome)
+```
+
+The misclassification accuracy of the resulting model on test set is 0.8364689.
+
+#### 3.2.2 (3 pts) Performance Metrics
+
+This looks like good performance, but misclassification accuracy can be misleading. It would be useful to look at the two-by-two table for the predictions vs. the true outcomes. `caret` has a function for this that also computes useful metrics to measure classifier performance. Find it in the documentation and use it to find the sensitivity and specificity of this model. What are those values for this model? What is a strategy or rule you could use to get a reasonable misclassification accuracy in this case without using any model or statistics at all?  
+
+**MY ANWSER:**    
+```{r}
+confusionMatrix(data=predicted_result, reference=testSet$outcome)
+```
+
+Tested on the test set, the sensitivity of this model is 0.16667, and the specificity of this model is 0.98584. A strategy that I could use to get a reasonable misclassification accuracy in this case without using any model or statistics is to predict 'survived' for everyone since this data has very unbalanced labels. Always predicting 'survived' could give an accuracy greater than 0.8. 
+
+#### 3.2.3 (12 pts) ROC and PR Curves
+
+Alternatively, we can use the predicted class *probabilities* instead of the predicted *classes* and use either a precision-recall or ROC curve to assess the model. 
+
+Write your own code and use `ggplot2` to generate both an ROC curve and a precision-recall curve for the performance of this model on the test set.
+
+```{r}
+# predict the class probabilites on the test set
+predicted_prob <- predict(LASSOFit1, newdata=testSet, type='prob')
+# create a combined dataframe for convinence (died_p, survived_p, real (1=died, 0=survived))
+predicted_prob_real <- cbind(predicted_prob, real=testSet$outcome)
+```  
+
+--ROC curve is TPR v.s. FPR
+TPR = TP/(TP+FN), also called sensitivity 
+FPR = FP/(TN+FP), same as 1 - specificity
+--Precision-Recall curve is precision v.s. recall
+recall = TPR
+precision = TP/(TP+FP)  
+```{r}
+# iterate over the threshold for cutoff p(died), compute the respective TPR, FPR, precision,
+TPR <- c()
+FPR <- c()
+precision <- c()
+
+for (p in seq(0, 1, by=0.01)){
+  real_predicted <-
+    predicted_prob_real %>%
+    mutate(predicted=ifelse(died>=p, "died", "survived")) %>%
+    select(real, predicted)
+  
+  tp <- nrow(filter(real_predicted, predicted=="died", real=="died")) # true positive
+  fp <- nrow(filter(real_predicted, predicted=="died", real=="survived")) # false positive
+  fn <- nrow(filter(real_predicted, predicted=="survived", real=="died")) # false negative
+  tn <- nrow(filter(real_predicted, predicted=="survived", real=="survived")) # true negative
+  # for ROC curve
+  thisTPR <- tp/(tp+fn)
+  thisFPR <- fp/(fp+tn)
+  TPR <- c(TPR, thisTPR)
+  FPR <- c(FPR, thisFPR)
+  
+  # for PR curve, note: recall is TPR
+  thisPrecision <- tp/(tp+fp)
+  precision <- c(precision, thisPrecision)
+  
+}
+
+FPR_TPR <-
+  data.frame(FPR=FPR, TPR=TPR)
+ggplot(FPR_TPR) +
+  geom_line(aes(x=FPR, y=TPR)) +
+  geom_abline(linetype=2) 
+recall_precision <-
+  data.frame(recall=TPR, precision=precision)
+ggplot(recall_precision) +
+  geom_line(aes(x=recall, y=precision), na.rm=TRUE) # some precision is NaN
+
+```
+
+
+#### 3.2.4 (8 pts) Calibration Plot
+
+Another good way to assess the utility of a classifier is with a calibration plot.
+
+Write your own code and use `ggplot2` to generate a calibration plot for the performance of this model on the test set.
+
+```{r}
+expected <- c()
+observed <- c()
+for (p in seq(0, 0.9, by=0.1)){
+  expected <- c(expected, p)
+  current_interval <-
+    predicted_prob_real %>%
+    filter(died>=p, died<p+0.1)
+  positive_rate <-
+    nrow(filter(current_interval, real=="died"))/nrow(current_interval)
+  observed <- c(observed, positive_rate)
+}
+
+calibration_plot <-
+  data.frame(observed=observed, expected=expected)
+linearfit <- lm(expected ~ observed, data = calibration_plot)
+r_squared <- signif(summary(linearfit)$adj.r.squared, digits=4)
+
+ggplot(calibration_plot) +
+  geom_point(aes(x=observed, y=expected), na.rm=TRUE)+ # some observed is NaN
+  xlim(0,1)+
+  ylim(0,1)+
+  geom_abline(linetype = "dashed")+
+  geom_smooth(method="lm",aes(x=observed, y=expected), na.rm=TRUE, se=FALSE) +
+  annotate("text", x=0.1, y=0.9, label="R_squared = ", size=4) +
+  annotate("text", x=0.2, y=0.9, label=as.character(r_squared), size=4)
+
+```
+
+
+### 3.3 (40 pts) Cross-Validation with the Elastic Net
+
+#### 3.3.1 (15 pts) Cross-Validating the Elastic Net in Caret
+
+Let's see if we can find a different model that will do better by searching over different values of $\gamma$ and $\alpha$. To assess the utility of each model, we will use four-fold cross validation over the training set and calculate the AUC (note that `caret` annoyingly refers to the AUC as the ROC) on each held-out set. At the end, we will use the model parameters that give the best result and see how well the model does on the test set. We will test over a grid of $\gamma$ and $\alpha$ values. Use $\gamma \in e^{[-6.5, -6, -5.5 ... -3, -2.5, -2]}$ and $\alpha \in [0.1, 0.5, 0.9]$.
+
+Use `caret` to do this cross-validation and produce a `caret` model object using the functions `trainControl`, `expand.grid`, and `train`. You will likely have to search google and the `caret` documentation to find out how to do this and how to set the metric to AUC. Use `set.seed(1)` right before you call `trainControl()` to ensure that you get the same cross-validation folds as everyone else. Depending on your computer, fitting these models could take a few minutes. Call `plot()` on the returned model object to examine how the AUC changes with the different parameter choices.  
+
+Examine the returned model object to find the values of $\alpha$ and $\lambda$ that produced the best result. What were they, and what was the AUC of that model? (*hint: the model object contains two dataframes that you can inner join that will neatly give you this result*)  
+
+```{r}
+set.seed(1)
+ENfitControl <- trainControl(## 4-fold CV
+  method="cv",
+  number=4,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+ENGrid <- expand.grid(.lambda=exp(seq(-6.5, -2, by=0.5)), .alpha=c(0.1,0.5,0.9))
+ENmodel <- train(outcome~., data=trainingSet,
+                 method="glmnet",
+                 family="binomial",
+                 trControl=ENfitControl,
+                 tuneGrid=ENGrid,
+                 metric="ROC")
+plot(ENmodel)
+
+```
+
+Examine the returned model object, the best performed model has alpha = 0.5 and lambda = 0.01831564. AUC of that model is 0.7985040. 
+
+#### 3.3.2 (5 pts) Model Performance
+
+Use the `pROC` package to calculate the AUC of the ROC curve for this model. What is the AUC statistic of this model on the test set? Is it close to what was estimated by cross-validation?
+
+```{r}
+library(pROC)
+predicted_prob_ENmodel <- predict(ENmodel, newdata=testSet, type='prob')
+pROC::auc(testSet$outcome, predicted_prob_ENmodel$died)
+```  
+
+The AUC of this model on the test set is 0.8097. It is close but a little bit higher than that was estimated by cross-validation. 
+
+Plot the ROC curve for the model on test set. 
+```{r}
+plot.roc(testSet$outcome, predicted_prob_ENmodel$died)
+```
+
+
+#### 3.3.3 (8 pts) Test Error Estimation After Feature Selection
+
+What if we had used univariate analyses on the training set to find all of the features that are significantly associated with mortality and have a large enough effect size and then used only those features to fit our models? Would you expect the cross-validation AUC to be on average larger, smaller, or the same as the test set AUC? Why? If you needed to reduce the feature space in this way, what could you in the cross validation to avoid potential mis-steps?  
+
+**MY ANWSER:**    
+This method is not a good method. I would expect the cross-validation AUC to be on average larger than the test set AUC. Because this supervised feature selection (using correlation with class labels) was performed on the whole training set and this makes the test data in each fold of cross validation has been seen by the model when choosing the features which may result in overfitting.  
+If I needed to reduce the feature space in this way, I would include using class labels for feature selection as part of my cross validation procedure. More specifically, I would define the folds, remove a fold, filter features on the other folds, select set of features, produce the model, then use it on the held out fold. 
+
+
+#### 3.3.4 (7 pts) Comparing Feature Selection Methods
+
+Is what is decribed above in 3.3.3 the same as we did earlier by removing the near-zero-variance features in the sense that we should we expect it to have a similar effect on the test vs. cross-validation AUC? Why or why not?  
+
+**MY ANWSER:**    
+No, what described above in 3.3.3 is not the same as we did earlier by removing the near-zero-variance features. Because in removing the near-zero-variance we removed the features based on its own distribution. We didn't use any information from class labels or their associations, therefore we didn't peek at the test dataset like we did in 3.3.3. 
+
+#### 3.3.5 (5 pts) Inspecting Coefficients
+
+For the best model, what are the 10 most important features (in terms of the magnitude of their coefficients) and their descriptions and feature types? You will need to call the `coef` function on an internal datastructure of the `caret` object to do this. As always, `dplyr` comes in handy as well.  
+
+```{r}
+coefs <- as.data.frame(as.matrix(coef(ENmodel$finalModel, s=0.01831564)))
+coefs$feature <- rownames(coefs)
+colnames(coefs) <- c("coefficient", "feature")
+
+top_10_feature <-
+  coefs %>%
+  filter(feature != "(Intercept)") %>%
+  mutate(mag_coef = abs(coefficient)) %>%
+  arrange(desc(mag_coef)) %>%
+  head(10) %>%
+  left_join(feature_descriptions, by="feature") %>%
+  select(feature, coefficient, feature_type, description)
+
+print(top_10_feature)
+```
+
+
+### 3.4 (35 pts) Cross Validation with Gradient Boosted Trees
+
+#### 3.4.1 (5 pts) Parameters for Gradient Boosted Trees
+
+Let's see if we can do better with a nonlinear model. Gradient boosted trees are considered to be state-of-the-art, so let's give them a shot. In `caret`, boosted trees are implemented in the `gbm` method, which has several parameters. Describe each parameter and whether increasing each of them increases or decreases the bias or variance.  
+
+**MY ANWSER:**    
+parameter             class                   label
+n.trees              numeric           Boosting Iterations
+interaction.depth    numeric              Max Tree Depth
+shrinkage            numeric          Shrinkage (learning rate)
+n.minobsinnode       numeric          Min. Terminal Node Size
+
+Increase n.trees will decrease the bias and increase the variance. Setting it too high may overfit.
+Increase interaction.depth will decrease the bias and increase the variance. 
+Increase shrinkage improve the generalizatio of the model. so increase bias and decrease variance. 
+Increase n.minobsinnode will increase the bias and decrease the variance.
+
+#### 3.4.2 (10 pts) Cross-Validating Gradient Boosted Trees in Caret
+
+Using the same evaluation metric (ROC) and the same cross-validation setup (4-fold CV) as before, fit a gradient boosted tree model using `caret`. Set the interaction depth at 3, the minimum observations per node at 3, and the shrinkage at 0.1. Fit models ranging from 5 to 250 trees, in increments of 5 trees. Again use `set.seed(1)` before calling `fitControl()`, but this time also call `set.seed(1)` before calling `train()`. Training may take some time depending on your computer. Plot the model object to see how the cross-validation AUC changes as more trees are fit, and report the best parameter set and the resulting AUC, sensitivity, and specificity.   
+
+```{r}
+set.seed(1)
+GBTfitControl <- trainControl(## 4-fold CV
+  method="cv",
+  number=4,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE
+)
+GBTGrid <- expand.grid(
+  interaction.depth=3, # interaction depth at 3
+  n.minobsinnode=3, # minimum observations per node at 3
+  shrinkage=0.1, # shrinkage at 0.1
+  n.trees=seq(5, 250, by=5) # 5 to 250 trees in increments of 5 trees
+)
+set.seed(1)
+GBTmodel <- train(outcome~., data=trainingSet,
+                 method="gbm",
+                 trControl=GBTfitControl,
+                 tuneGrid=GBTGrid,
+                 metric="ROC")
+ggplot(GBTmodel)
+
+```  
+
+**MY ANWSER:**    
+The best parameter set is n.trees = 95, interaction.depth = 3, shrinkage = 0.1 and n.minobsinnode = 3. The resulting AUC is 0.8216428, sensitivity is 0.29563492 and specificity is 0.9606195.
+
+#### 3.4.3 (4 pts) Model Performance
+
+Plot the test set ROC curve for this model.
+
+```{r}
+predicted_prob_GBTmodel <- predict(GBTmodel, newdata=testSet, type='prob')
+plot.roc(testSet$outcome, predicted_prob_GBTmodel$died)
+```
+
+
+#### 3.4.4 (5 pts) Variable Importance
+
+Use the `varImp` function to find the top ten most important features in this model. Report the importance measures, descriptions, and feature types for these top ten features. Read up about how these importance measures are calculated. Would a variable that is only split on in the first tree be more important than a variable that is only split on in the 200th tree? Which types of feature seem to be the most useful? Why do you think that is the case?   
+
+
+#### 3.4.5 (5 pts) Partial Dependence Plots
+
+One of the nice things about tree ensembles is that they can automatically find and exploit interactions between features. Use the final model object and the plot command exported by the `gbm` package to plot the two-way partial dependence of the outcome on `age_in_days` and `chartvalue_198` as well as the one-way partial dependance on each of them individually. Read a bit about partial dependence plots. Is the effect of age linear? What combination of these two features is most associated with worse outcomes? Do you think the result makes sense? Why or why not?
+
+#### 3.4.6 (6 pts) Investigating the Effect of Age
+
+What is strange about the range of the age variable in the partial dependence plot? Investigate by plotting a histogam of patient ages. What does this say about the data? Do you think this adversely affects the test set peformance of the gradient boosted tree model? What do you think the effect is on the linear model? Do you have evidence of that effect given the coefficients of the linear model?
+
+### 3.5 (5 pts) Proper Evaluation of Predictive Models
+
+Given that we randomly split the data into training and test sets, do you think that the test set accuracy would be a good estimate, an overestimate, or an underestimate of the accuracy if we used this model to predict mortality for patients in the coming year? Justify your answer in one or two sentences. Give a suggestion for an alternative data-splitting method that could be better and why.
+
+## 4. (70 pts) Causal Analyses
+
+In our predictive analyses we saw that we could do a reasonable job of predicting mortality, but there are many cases where simply having a good prediction is not of much value. If clinicians are interested in saving the patient, they need to know what the causal factors are that lead to death so that they can intervene in the right place. Usually this question takes the form of comparing two exposures (drugs or procedures, for example), but we can also ask if the natural occurance of a condition causally leads to a bad outcome. Here we will investigate if having a sudden and sustained drop in oxygenation during ventilation (which we will refer to as the *exposure*) is causally related to death later in the hospitalization (the *outcome*).
+
+### 4.1 (20 pts) Analyses without Matching
+
+#### 4.1.1 (5 pts) Univariate Analysis
+
+Run an appropriate statistical test to see if a drop in oxygenation is related to mortality. Treat both variables as binary.
+
+What is the odds ratio? Does a drop in oxygenation appear to significantly decrease or increase the risk of death? Does this establish causality between a drop in oxygenation and mortality? Why or why not? If you think it does not, how else would you explain the result?
+
+#### 4.1.2 (10 pts) Multivariate Analysis
+
+Let's see if we still see an effect after adjusting for other features. Run the appropriate kind of unregularized regression (using `glm`) of mortality on the same set of features as in the predictive modeling section (i.e. exclude near-zero variance features). You can use a formula like `died ~ .` to regress a variable named `died` in a data frame on the rest of the variables in that data frame.
+
+Is the coefficient of the feature encoding a drop in oxygenation statistically significant in the model? What is the equivalent odds ratio? Does this establish causality between a drop in oxygenation and mortality? Why or why not? If you think it does not, how else would you explain the result?
+
+#### 4.1.3 (5 pts) Equivalent Experiment
+
+Is there an experiment that you could run that would let you determine the causal effect of a sudden oxygenation drop on mortality using only these inferential analyses? What might be some practical problems with your experiment?
+
+### 4.2 (50 pts) Matching Analysis with Propensity Scores
+
+#### 4.2.1 (12 pts) Propensity Modeling 
+
+To try and more conclusively determine what the causal effect is we'll do a *propensity score* analysis. 
+
+Estimate the exposure propensities of all the patients in the dataset using a gradient boosted tree model in `caret`. Use the same set of features as in the predictive modeling section (i.e. exclude near-zero variance features), but of course exclude the feature that encodes the exposure (`oxy_drop`). Remember that now we are fitting a model to the *exposure* (`oxy_drop`) and not the *outcome*. Use the same parameter settings as before and the same cross-validation setup. Again remember to `set.seed(1)` before calling `trainControl()` and again before calling `train()` to ensure that your result is reproducible.
+
+#### 4.2.2 (10 pts) Propensity Estimation 
+
+Use your model to predict the propensity for each patient in the dataset. Use `qplot` to make a density plot (like a histogram) of the logits of the estimated propensities for all patients who truly did experience a sudden drop in oxygenation and an equivalant density plot for patients that did not. Diplay both curves in the same plot, coloring them differently. The `car` package has a `logit()` function you can use if you don't care to write your own.
+
+What does the amount of overlap between these two distributions say about how good your propensity score model is predicting the exposure? Is it bad if your model has poor performance? (*hint: if the exposure happened totally at random, would that help you or hurt you in determining a causal effect?*)
+
+#### 4.2.3 (8 pts) Caliper Matching
+
+The next step of a propensity score analysis is to match patients based on their propensities. Patients who have similar propensities are more "twin-like", so if one is exposed and the other isn't and then they have different outcomes, it's easier to say that the difference in exposure is what caused the different outcomes.
+
+Use the `Match()` function from the `Matching` package to find a subset of the data where every exposed patient has a matched unexposed counterpart. Do the matching on the logit of the esimated propensity instead of on the propensity itself. Match without replacement and use a caliper (the maximum distance allowed between two matched patients) of 0.25. Your result should be a single vector containing the row numbers of the matched patients.
+
+How many patients are in the matched set? How does this number compare to the orignal number of patients in the dataset? 
+
+#### 4.2.4 (8 pts) Matched Outcomes Analysis
+
+Repeat your statistical test from above to see if the odds ratio between an drop in oxygenation is related to mortality, but this time use only data from the matched patients.
+
+Is the estimated effect different than before? Is it significantly protective or harmful? How do you interpret this result?
+
+#### 4.2.5 (4 pts) Effect of Caliper
+
+We could have had a stricter caliper and enforced that patients had to be more similar to be matched- what would have been the tradeoff in doing that in terms of the bias and variance of the estimate of the causal effect?
+
+#### 4.2.6 (4 pts) Including Post-Exposure Data in Propensity Models
+
+In our dataset all of the information we have for each patient is from before the index time, which by definition is before the exposure time. What if we had included some data from after the exposure to fit the propensity score model? For instance, what if we included the total cost of the hospitalization as a feature that we used to estimate exposure propensities? Would our inference still be causally valid? Why or why not?
+
+#### 4.2.7 (4 pts) Lingering Biases
+
+What are some sources of bias that our propensity score analysis cannot correct for? 
+
