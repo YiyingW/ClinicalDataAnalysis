@@ -754,18 +754,57 @@ plot.roc(testSet$outcome, predicted_prob_GBTmodel$died)
 
 Use the `varImp` function to find the top ten most important features in this model. Report the importance measures, descriptions, and feature types for these top ten features. Read up about how these importance measures are calculated. Would a variable that is only split on in the first tree be more important than a variable that is only split on in the 200th tree? Which types of feature seem to be the most useful? Why do you think that is the case?   
 
+```{r}
+GBTImp <- varImp(GBTmodel, useModel=TRUE)[[1]] # a data frame 
+Tree_features <- rownames(GBTImp)
+GBTImp <- cbind.data.frame(GBTImp, Tree_features, stringsAsFactors = FALSE)
+top_10_feature_tree <-
+  GBTImp %>%
+  arrange(desc(Overall)) %>%
+  head(10) %>%
+  left_join(.,feature_descriptions, by=c("Tree_features"="feature")) %>%
+  select(Tree_features, Overall, feature_type, description) %>%
+  dplyr::rename(Importance_measures=Overall)
+print(top_10_feature_tree)
+```
+
+**MY ANWSER:**    
+The importance measures are calculated by adding up the total amount that the Gini index is decreased by splits over a given variable, averaged over all the trees. I think a variable that is only split on in the first tree is more important than a variable that is only split on in the 200th tree because on the basis that they are both used once for splitting, the one used in the first tree contributes to a much larger portion of samples than the one used in the 200th tree. The type of features that seems to be the most useful is chartvalue. I think this is the case might because the chartvalue are continuous numerical values so the gradient boosted trees model can use these variables more often (splitting in different positions) so that they provide more information for the model. 
 
 #### 3.4.5 (5 pts) Partial Dependence Plots
 
-One of the nice things about tree ensembles is that they can automatically find and exploit interactions between features. Use the final model object and the plot command exported by the `gbm` package to plot the two-way partial dependence of the outcome on `age_in_days` and `chartvalue_198` as well as the one-way partial dependance on each of them individually. Read a bit about partial dependence plots. Is the effect of age linear? What combination of these two features is most associated with worse outcomes? Do you think the result makes sense? Why or why not?
+One of the nice things about tree ensembles is that they can automatically find and exploit interactions between features. Use the final model object and the plot command exported by the `gbm` package to plot the two-way partial dependence of the outcome on `age_in_days` and `chartvalue_198` as well as the one-way partial dependance on each of them individually. Read a bit about partial dependence plots. Is the effect of age linear? What combination of these two features is most associated with worse outcomes? Do you think the result makes sense? Why or why not?  
+```{r}
+plot(GBTmodel$finalModel, i.var=c("age_in_days","chartvalue_198"))
+plot(GBTmodel$finalModel, i.var=c("age_in_days"))
+plot(GBTmodel$finalModel, i.var=c("chartvalue_198"))
+```
+  
+Is the effect of age linear?
+Yes. The effect of age is nearly linear in the range of normal human lifetime (20,000 days to 30,000 days). There are apparently outliers in age_in_days variable.   
+What combination of these two features is most associatied with worse outcomes? Make sense or not?  
+The combination of age_in_days being greater than 30,000 and chartvalue_198 being less than 6.5 is most associated with worse outcomes. This makes sense because the older a person is, the more likely that this person is going to die. As for chartvalue_198, it represents GCS Total (Glasgow Coma Score) which is scored between 3 and 15. 3 being the worst. 15 the best. So the smaller this number is, the more likely this person is going to die.  
+
 
 #### 3.4.6 (6 pts) Investigating the Effect of Age
 
-What is strange about the range of the age variable in the partial dependence plot? Investigate by plotting a histogam of patient ages. What does this say about the data? Do you think this adversely affects the test set peformance of the gradient boosted tree model? What do you think the effect is on the linear model? Do you have evidence of that effect given the coefficients of the linear model?
+What is strange about the range of the age variable in the partial dependence plot? Investigate by plotting a histogam of patient ages. What does this say about the data? Do you think this adversely affects the test set peformance of the gradient boosted tree model? What do you think the effect is on the linear model? Do you have evidence of that effect given the coefficients of the linear model?  
+
+**MY ANWSER:**   
+It is strange about the range of the age variable in the partial dependence plot is that there are some people with unrealistic high age_in_days value (over 200 years old). 
+```{r}
+ggplot(PredictiveMatrix)+
+  geom_histogram(aes(x=age_in_days), binwidth=1000)
+```
+
+This means the data has outliers. Maybe there were some mistakes when data was recorded. I don't think this adversely affects the test set performance of the GBT model because this model is not sensitive to outliers. It would probability still split the data at the same position if there were no such outliers. There will make age feature lose predictive effect on the linear model. The coefficient for age_in_days in the linear model is -1.244906e-05. This is very small so age doesn't have much predictive power in linear model because of the outliers. 
 
 ### 3.5 (5 pts) Proper Evaluation of Predictive Models
 
-Given that we randomly split the data into training and test sets, do you think that the test set accuracy would be a good estimate, an overestimate, or an underestimate of the accuracy if we used this model to predict mortality for patients in the coming year? Justify your answer in one or two sentences. Give a suggestion for an alternative data-splitting method that could be better and why.
+Given that we randomly split the data into training and test sets, do you think that the test set accuracy would be a good estimate, an overestimate, or an underestimate of the accuracy if we used this model to predict mortality for patients in the coming year? Justify your answer in one or two sentences. Give a suggestion for an alternative data-splitting method that could be better and why.  
+
+**MY ANWSER:**   
+I think the test set accuracy would be an overestimate of the accuracy if we used this model to predict mortality for patients in the coming year. Because by randomly splitting the data into training and test, we failed to take into consideration that as time changes, there might also be some systematic changes in the system. It is possible that a model created using last year's data does not perform well on the next year's data. An alternative data-splitting method that could be better is to stratify data based both on outcome and on time. That is using a few years data as training set, another few years data as validation set and some other years data as test set. This will tell us if our model has predictive power for data coming from years that are not used in training set. 
 
 ## 4. (70 pts) Causal Analyses
 
