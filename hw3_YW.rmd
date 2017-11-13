@@ -319,6 +319,9 @@ Assuming there are no systematic biases in the data and the only errors are from
 **MY ANWSER:**    
 I think there is a problem of multicollinearity in model3. I came to this conclusion by comparing the confidence intervals of the coefficient for parameter oxy_drop. The ranges of confidence intervals imply the size of standard errors. In Model1, oxy_drop's coefficent confidence interval ranges over a size of 0.3681231, compared to 0.3686322 in model2 and 0.4166014 in model3. As adding more features, oxy_drop's coefficent confidence interval is getting bigger, indicating the standard errors for coefficent is becoming bigger. This is because the more correlated the features are with each other, the bigger the standard errors become for their coefficents, and the less likely it is that a coefficient will be statistically significant. And this is known as the problem of multicollinearity. Model3 compared with model1 and model2 has more correlated independent variables, therefore, it is more difficult to determine how much variation in outcome that oxy_drop is responsible for. As a result, the standard errors for oxy_drop's coefficent become larger. One thing we could do in the modeling procedure to minimize this problem is to measure pearson correlcation coefficient to determine multicollinearity first, and only include the features that are not linearly associated into regression model.  
 
+If the variances of the estimated coefficients are inflated by multicollinearity, then confidence intervals for the slop parameters are
+wider and therefore less useful. 
+
 
 #### 2.2.4 (3 pts) Testing Residuals
 
